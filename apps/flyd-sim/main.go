@@ -6,9 +6,9 @@ import (
 	"log"
 	"net"
 
-	pb "/aerophoenix/proto/machine.proto" // adjust module path
-
 	"google.golang.org/grpc"
+
+	pb "github.com/devghori1264/aerophoenix/flyd-sim/internal/proto"
 )
 
 type server struct {

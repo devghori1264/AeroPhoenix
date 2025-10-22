@@ -1,0 +1,6 @@
+.DS_Store
+
+apps/flyd-sim/data/
+apps/flyd-sim/tests/testdata/
+
+apps/flyd-sim/server

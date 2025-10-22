@@ -1,6 +1,8 @@
 syntax = "proto3";
 package aerophoenix.machine;
 
+option go_package = "github.com/devghori1264/aerophoenix/apps/flyd-sim/proto;machine";
+
 service MachineService {
   rpc Ping (PingRequest) returns (PingResponse);
   rpc CreateMachine (CreateRequest) returns (CreateResponse);
