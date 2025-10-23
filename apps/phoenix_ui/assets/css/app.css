@@ -1,7 +1,12 @@
 /* See the Tailwind configuration guide for advanced usage
    https://tailwindcss.com/docs/configuration */
 
-@import "tailwindcss" source(none);
+@import "tailwindcss";
+@layer base {
+  html, body {
+    @apply bg-gray-950 text-gray-50 font-sans;
+  }
+}
 @source "../css";
 @source "../js";
 @source "../../lib/phoenix_ui_web";
@@ -89,6 +94,12 @@
   --border: 1.5px;
   --depth: 1;
   --noise: 0;
+}
+
+@theme {
+  --color-brand-50: #eef7ff;
+  --color-brand-500: #0077ff;
+  --color-brand-700: #0055cc;
 }
 
 /* Add variants based on LiveView classes */

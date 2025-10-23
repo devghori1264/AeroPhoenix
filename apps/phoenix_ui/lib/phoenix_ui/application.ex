@@ -1,7 +1,4 @@
 defmodule PhoenixUi.Application do
-  # See https://hexdocs.pm/elixir/Application.html
-  # for more information on OTP Applications
-  @moduledoc false
 
   use Application
 
@@ -11,20 +8,14 @@ defmodule PhoenixUi.Application do
       PhoenixUiWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:phoenix_ui, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: PhoenixUi.PubSub},
-      # Start a worker by calling: PhoenixUi.Worker.start_link(arg)
-      # {PhoenixUi.Worker, arg},
-      # Start to serve requests, typically the last entry
+      {Finch, name: PhoenixUiWeb.Finch},
       PhoenixUiWeb.Endpoint
     ]
 
-    # See https://hexdocs.pm/elixir/Supervisor.html
-    # for other strategies and supported options
     opts = [strategy: :one_for_one, name: PhoenixUi.Supervisor]
     Supervisor.start_link(children, opts)
   end
 
-  # Tell Phoenix to update the endpoint configuration
-  # whenever the application is updated.
   @impl true
   def config_change(changed, _new, removed) do
     PhoenixUiWeb.Endpoint.config_change(changed, removed)

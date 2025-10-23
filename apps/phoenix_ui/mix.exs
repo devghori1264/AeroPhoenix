@@ -15,9 +15,6 @@ defmodule PhoenixUi.MixProject do
     ]
   end
 
-  # Configuration for the OTP application.
-  #
-  # Type `mix help compile.app` for more information.
   def application do
     [
       mod: {PhoenixUi.Application, []},
@@ -31,7 +28,6 @@ defmodule PhoenixUi.MixProject do
     ]
   end
 
-  # Specifies which paths to compile per environment.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
@@ -63,7 +59,12 @@ defmodule PhoenixUi.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:httpoison, "~> 2.1"}
+      {:httpoison, "~> 2.1"},
+      {:telemetry_metrics_prometheus, "~> 1.0"},
+      {:finch, "~> 0.13"},
+      {:plug_cowboy, "~> 2.6"},
+      {:ecto_sql, "~> 3.11"},
+      {:floki, ">= 0.30.0", only: :test}
     ]
   end
 
