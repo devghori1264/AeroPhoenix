@@ -7,28 +7,101 @@ on:
     branches: [ main ]
 
 jobs:
-  build-elixir:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      elixir_cached: ${{ steps.elixir_cache.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Elixir deps
+        id: elixir_cache
+        uses: actions/cache@v4
+        with:
+          path: _build deps
+          key: ${{ runner.os }}-elixir-${{ hashFiles('**/mix.lock') }}
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            /home/runner/work/_temp/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+  elixir:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Elixir
-        uses: actions/setup-elixir@v1
+      - name: Setup Erlang & Elixir
+        uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.15'
-          otp-version: '25'
+          otp-version: '25.3'
       - name: Install deps
         run: |
-          cd apps/phoenix_ui
-          mix deps.get
+          cd apps/orchestrator && mix deps.get
+          cd ../phoenix_ui && mix deps.get
+      - name: Run Elixir tests
+        run: |
+          cd apps/orchestrator && mix test
+          cd ../phoenix_ui && mix test
 
-  build-go:
+  go:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
-      - run: |
+          go-version: '1.25'
+      - name: Build & Test flyd-sim
+        run: |
           cd apps/flyd-sim
-          go test ./...
+          go mod tidy
+          go test ./... -v
+      - name: Build & Test CLI
+        run: |
+          cd cli/aeropctl
+          go mod tidy
+          go test ./... -v
+
+  rust:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Build & Test net-sim
+        run: |
+          cd apps/net-sim
+          cargo build --verbose
+          cargo test --verbose
+
+  docker-build:
+    needs: [elixir, go, rust]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build flyd-sim image
+        run: |
+          docker build -f apps/flyd-sim/Dockerfile -t ghcr.io/${{ github.repository }}/flyd-sim:latest apps/flyd-sim
+          docker push ghcr.io/${{ github.repository }}/flyd-sim:latest
+      - name: Build net-sim image
+        run: |
+          docker build -f apps/net-sim/Dockerfile -t ghcr.io/${{ github.repository }}/net-sim:latest apps/net-sim
+          docker push ghcr.io/${{ github.repository }}/net-sim:latest

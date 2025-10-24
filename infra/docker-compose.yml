@@ -27,6 +27,8 @@ services:
     build:
       context: ../apps/flyd-sim
       dockerfile: Dockerfile
+    environment:
+      - NATS_URL=nats://nats:4222
     volumes:
       - ../apps/flyd-sim/data:/data
     ports:
@@ -36,6 +38,16 @@ services:
     depends_on:
       - postgres
       - nats
+
+  net-sim:
+    build:
+      context: ../apps/net-sim
+    environment:
+      - FLYD_SIM_BASE=http://flyd-sim:8080
+    ports:
+      - "7070:7070"
+    depends_on:
+      - flyd-sim
 
 volumes:
   postgres_data:

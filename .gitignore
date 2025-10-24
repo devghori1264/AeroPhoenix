@@ -3,4 +3,7 @@
 apps/flyd-sim/data/
 apps/flyd-sim/tests/testdata/
 
-apps/flyd-sim/server
+apps/net-sim/target/
+target/
+
+apps/net-sim/net_sim

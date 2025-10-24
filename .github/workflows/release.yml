@@ -1,0 +1,22 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build demo artifacts
+        run: |
+          # Build small demo tarball
+          tar -czf demo_assets.tar.gz demo demo_video.mp4 docs
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: demo_assets.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

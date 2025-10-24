@@ -30,6 +30,7 @@ message GetRequest { string id = 1; }
 message GetResponse {
   string id = 1;
   string status = 2;
+  string region = 3;
 }
 
 message ActionRequest { string id = 1; }
