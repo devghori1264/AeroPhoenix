@@ -2,95 +2,118 @@ import "phoenix_html";
 import { Socket } from "phoenix";
 import { LiveSocket } from "phoenix_live_view";
 import topbar from "../vendor/topbar";
-import TopologyHook from "./topology";
 
-let Hooks = {};
+import TopologyHook from "./hooks/topology";
+import LogsHook from "./hooks/logs_hook";
+import ClipboardHook from "./hooks/clipboard_hook";
+import MetricsChartHook from "./hooks/metrics_chart_hook";
 
-Hooks.TopologyHook = TopologyHook;
+console.groupCollapsed("[AeroPhoenix] UI Runtime Initialization");
+console.info("Initializing Phoenix LiveView runtime...");
+
+const Hooks = {
+  TopologyHook,
+  LogsHook,
+  ClipboardHook,
+  MetricsChartHook,
+};
 
 Hooks.CopyCli = {
   mounted() {
-    console.log("[AeroPhoenix] CopyCli hook mounted.");
+    console.log("[CopyCli] Hook mounted.");
+
     this.handleEvent("copy-cli", (payload) => {
-      if (payload && payload.cmd) {
-        console.log("Received copy-cli event:", payload.cmd);
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(payload.cmd)
-            .then(() => {
-              alert("CLI command copied to clipboard!");
-              console.info("CLI command copied successfully.");
-            })
-            .catch((err) => {
-              console.error("Failed to copy CLI command:", err);
-              alert("Failed to copy command. See console for details.");
-            });
-        } else {
-          console.warn("Clipboard API not available. Cannot copy command.");
-          alert("Clipboard API not available in this browser.");
-        }
+      const cmd = payload?.cmd;
+      if (!cmd) {
+        console.warn("[CopyCli] Missing or invalid payload:", payload);
+        return;
+      }
+
+      console.log(`[CopyCli] Copying CLI command: ${cmd}`);
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard
+          .writeText(cmd)
+          .then(() => {
+            console.info("[CopyCli] Command copied successfully.");
+            alert("CLI command copied to clipboard!");
+          })
+          .catch((err) => {
+            console.error("[CopyCli] Clipboard write failed:", err);
+            alert("Failed to copy command. See console for details.");
+          });
       } else {
-        console.warn("Received copy-cli event with invalid payload:", payload);
+        console.warn("[CopyCli] Clipboard API not available.");
+        alert("Clipboard API not supported in this browser.");
       }
     });
   },
   destroyed() {
-    console.log("[AeroPhoenix] CopyCli hook destroyed.");
-  }
+    console.log("[CopyCli] Hook destroyed.");
+  },
 };
 
-const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
+const csrfToken = document
+  .querySelector("meta[name='csrf-token']")
+  ?.getAttribute("content");
+
 if (!csrfToken) {
-  console.warn("CSRF token meta tag not found. LiveView sessions may fail.");
+  console.warn(
+    "[AeroPhoenix] Warning: CSRF token not found. LiveView may not function correctly."
+  );
 }
 
 const liveSocket = new LiveSocket("/live", Socket, {
+  hooks: Hooks,
   longPollFallbackMs: 2500,
   params: { _csrf_token: csrfToken },
-  hooks: Hooks,
 });
 
-topbar.config({ barColors: { 0: "#29d" }, shadowColor: "rgba(0, 0, 0, .3)" });
-let topBarScheduled = undefined;
-
-window.addEventListener("phx:page-loading-start", (_info) => {
-  clearTimeout(topBarScheduled);
-  topBarScheduled = setTimeout(() => topbar.show(300), 120);
+topbar.config({
+  barColors: { 0: "#29d" },
+  shadowColor: "rgba(0, 0, 0, 0.3)",
 });
-window.addEventListener("phx:page-loading-stop", (_info) => {
-  clearTimeout(topBarScheduled);
+
+let topBarTimer = undefined;
+
+window.addEventListener("phx:page-loading-start", () => {
+  clearTimeout(topBarTimer);
+  topBarTimer = setTimeout(() => topbar.show(300), 150);
+});
+
+window.addEventListener("phx:page-loading-stop", () => {
+  clearTimeout(topBarTimer);
   topbar.hide();
 });
 
 liveSocket.connect();
-
 window.liveSocket = liveSocket;
 
 if (process.env.NODE_ENV === "development") {
   window.addEventListener("phx:live_reload:attached", ({ detail: reloader }) => {
     reloader.enableServerLogs();
 
-    let keyDown = null;
-    window.addEventListener("keydown", (e) => (keyDown = e.key));
-    window.addEventListener("keyup", () => (keyDown = null));
+    let activeKey = null;
+    window.addEventListener("keydown", (e) => (activeKey = e.key));
+    window.addEventListener("keyup", () => (activeKey = null));
+
     window.addEventListener(
       "click",
       (e) => {
-        if (keyDown === "c") {
+        if (activeKey === "c") {
           e.preventDefault();
-          e.stopImmediatePropagation();
           reloader.openEditorAtCaller(e.target);
-        }
-        else if (keyDown === "d") {
+        } else if (activeKey === "d") {
           e.preventDefault();
-          e.stopImmediatePropagation();
           reloader.openEditorAtDef(e.target);
         }
       },
       true
     );
 
+    console.log("[AeroPhoenix] Developer live reloader attached.");
     window.liveReloader = reloader;
   });
 }
 
-console.log("[AeroPhoenix] UI initialized successfully.");
+console.info("[AeroPhoenix] LiveSocket connected successfully.");
+console.groupEnd();

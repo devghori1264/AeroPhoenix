@@ -64,7 +64,11 @@ defmodule PhoenixUi.MixProject do
       {:finch, "~> 0.13"},
       {:plug_cowboy, "~> 2.6"},
       {:ecto_sql, "~> 3.11"},
-      {:floki, ">= 0.30.0", only: :test}
+      {:floki, ">= 0.30.0", only: :test},
+      {:oban, "~> 2.16", only: :prod},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:telemetry, "~> 1.2"},
+      {:uuid, "~> 1.1"}
     ]
   end
 

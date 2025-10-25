@@ -17,8 +17,16 @@ defmodule PhoenixUiWeb.Router do
   scope "/", PhoenixUiWeb do
     pipe_through :browser
 
-    live "/", DashboardLive
+    live "/", DashboardLive, :index
+    live "/dashboard", DashboardLive, :index
     get "/home", PageController, :home
+  end
+
+  if Mix.env() in [:dev, :test] do
+    scope "/__dev", PhoenixUiWeb do
+      pipe_through :api
+      post "/publish_machine", DevTestController, :publish_machine
+    end
   end
 
   if Application.compile_env(:phoenix_ui, :dev_routes) do
@@ -26,7 +34,6 @@ defmodule PhoenixUiWeb.Router do
 
     scope "/dev" do
       pipe_through :browser
-
       live_dashboard "/dashboard", metrics: PhoenixUiWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end

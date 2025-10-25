@@ -42,4 +42,12 @@ config :logger, :default_formatter,
 
 config :phoenix, :json_library, Jason
 
+config :phoenix_ui, PhoenixUiWeb.OrchestratorClient,
+  base_url: System.get_env("ORCHESTRATOR_URL", "http://localhost:4001"),
+  request_timeout: String.to_integer(System.get_env("ORCHESTRATOR_TIMEOUT", "5000")),
+  token: System.get_env("ORCHESTRATOR_TOKEN", "dev-token")
+
+config :phoenix_ui, :topology,
+  refresh_interval_ms: String.to_integer(System.get_env("PHX_TOPOLOGY_REFRESH_MS", "1000"))
+
 import_config "#{config_env()}.exs"

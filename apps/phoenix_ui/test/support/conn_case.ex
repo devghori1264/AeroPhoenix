@@ -9,7 +9,7 @@ defmodule PhoenixUiWeb.ConnCase do
       import PhoenixUiWeb.ConnCase
 
       @endpoint PhoenixUiWeb.Endpoint
-
+      alias PhoenixUiWeb.Router.Helpers, as: Routes
       use PhoenixUiWeb, :verified_routes
     end
   end

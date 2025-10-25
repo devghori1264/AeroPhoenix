@@ -1,0 +1,75 @@
+<div class="p-4 space-y-4">
+  <div class="flex items-center justify-between">
+    <h1 class="text-xl font-bold">AeroPhoenix — Dashboard</h1>
+    <div class="flex items-center gap-2">
+      <button phx-click="refresh" class="btn">Refresh</button>
+    </div>
+  </div>
+
+  <!-- Topology -->
+  <div class="bg-slate-900 rounded-lg p-3">
+    <%= live_component @socket, PhoenixUiWeb.TopologyComponent, id: "topo", topology: @topology %>
+  </div>
+
+  <div class="grid grid-cols-3 gap-4">
+    <!-- Left: Machine Grid + Logs -->
+    <div class="col-span-2 space-y-4">
+      <!-- Machine grid -->
+      <div class="grid grid-cols-3 gap-3">
+        <%= for m <- @machines do %>
+          <%= live_component @socket, PhoenixUiWeb.MachineCardComponent, id: m.id, machine: m %>
+        <% end %>
+      </div>
+
+      <!-- Logs -->
+      <div class="bg-slate-800 p-3 rounded">
+        <h3 class="text-sm font-semibold text-white">Live Logs</h3>
+        <div id="logs" phx-hook="LogsHook" class="h-40 overflow-auto mt-2"></div>
+      </div>
+    </div>
+
+    <!-- Right: Insights + Selected + Metrics -->
+    <div class="col-span-1 space-y-4">
+      <!-- Predictive Insights -->
+      <div class="bg-slate-800 p-3 rounded">
+        <h3 class="text-sm font-semibold text-white">Predictive Insights</h3>
+        <div id="predictive" phx-hook="PredictiveHook" class="mt-2 text-sm text-gray-300">
+          <%= if @prediction do %>
+            <%= for rec <- @prediction.recommendations do %>
+              <div class="mb-2">• <%= rec["message"] || rec.message %> (<%= rec["score"] || rec.score %>)</div>
+            <% end %>
+          <% else %>
+            <div class="text-gray-400">No insights yet</div>
+          <% end %>
+        </div>
+      </div>
+
+      <!-- Selected Machine Panel -->
+      <div class="bg-slate-800 p-3 rounded">
+        <h3 class="text-sm font-semibold text-white">Selected</h3>
+        <%= if @selected do %>
+          <div class="mt-2 text-sm text-gray-200">
+            <p>Name: <%= @selected.name %></p>
+            <p>Region: <%= @selected.region %></p>
+            <p>Status: <%= Atom.to_string(@selected.status) %></p>
+
+            <div class="mt-2 flex gap-2">
+              <button phx-click="action" phx-value-id={@selected.id} phx-value-action="restart"
+                      class="px-2 py-1 bg-blue-600 text-white rounded">Restart</button>
+              <button phx-click="action" phx-value-id={@selected.id} phx-value-action="migrate"
+                      class="px-2 py-1 bg-yellow-500 text-black rounded">Migrate</button>
+            </div>
+
+            <!-- Metrics component -->
+            <div class="mt-3">
+              <%= live_component @socket, PhoenixUiWeb.MetricsChartComponent,
+                    id: "metrics-#{@selected.id}", machine_id: @selected.id %>
+            </div>
+          </div>
+        <% else %>
+          <div class="text-gray-400">Select a machine on the map</div>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</div>

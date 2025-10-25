@@ -7,18 +7,25 @@
     "build": "esbuild js/app.js --bundle --target=es2017 --outdir=../priv/static/assets --minify",
     "watch": "esbuild js/app.js --bundle --target=es2017 --outdir=../priv/static/assets --watch",
     "deploy": "NODE_ENV=production yarn build",
-    "tailwind:build": "./node_modules/.bin/tailwindcss -i ./css/app.css -o ../priv/static/assets/app.css --minify",
-    "tailwind:watch": "./node_modules/.bin/tailwindcss -i ./css/app.css -o ../priv/static/assets/app.css --watch"
+    "tailwind:build": "tailwindcss -i ./css/app.css -o ../priv/static/assets/app.css --minify",
+    "tailwind:watch": "tailwindcss -i ./css/app.css -o ../priv/static/assets/app.css --watch"
   },
   "dependencies": {
+    "chart.js": "^4.5.1",
     "d3": "^7.9.0",
     "esbuild": "^0.24.0",
+    "phoenix": "^1.7.10",
+    "phoenix_live_view": "^0.19.0",
     "topojson-client": "^3.1.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.21",
     "concurrently": "^8.2.2",
     "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.15"
-  }
+    "tailwindcss": "^4.1.16"
+  },
+  "main": "postcss.config.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
