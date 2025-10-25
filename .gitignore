@@ -10,4 +10,4 @@ apps/net-sim/net_sim
 
 apps/phoenix_ui/e2e/node_modules/
 
-apps/phoenix_ui/e2e/test-results
+apps/phoenix_ui/e2e/test-results.env
