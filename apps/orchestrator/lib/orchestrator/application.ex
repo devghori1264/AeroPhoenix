@@ -8,10 +8,10 @@ defmodule Orchestrator.Application do
       Orchestrator.Repo,
       {Finch, name: Orchestrator.Finch},
       {TelemetryMetricsPrometheus, metrics: Orchestrator.Metrics.metrics(), port: 9568, path: "/metrics"},
-      Orchestrator.Manager,
+      if(Mix.env() != :test, do: Orchestrator.Manager),
       OrchestratorWeb.Endpoint
     ]
-
+    children = Enum.reject(children, &is_nil/1)
     opts = [strategy: :one_for_one, name: Orchestrator.Supervisor]
     Supervisor.start_link(children, opts)
   end

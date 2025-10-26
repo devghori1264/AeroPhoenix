@@ -28,3 +28,5 @@ config :orchestrator, OrchestratorWeb.Endpoint,
 
 config :orchestrator, Orchestrator.Predictor,
   ema_alpha: 0.2
+
+import_config "#{Mix.env()}.exs"
