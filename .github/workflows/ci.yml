@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
     branches: [ main ]
@@ -35,18 +34,37 @@ jobs:
   elixir:
     needs: setup
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: aerouser
+          POSTGRES_PASSWORD: aeropass
+          POSTGRES_DB: aerophoenix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
       - name: Setup Erlang & Elixir
         uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.15'
-          otp-version: '25.3'
+          otp-version: '27.0'
       - name: Install deps
         run: |
           cd apps/orchestrator && mix deps.get
           cd ../phoenix_ui && mix deps.get
+
       - name: Run Elixir tests
+        env:
+          DATABASE_URL: "ecto://postgres:password@localhost:5432/orchestrator_test"
+          MIX_ENV: test
         run: |
           cd apps/orchestrator && mix test
           cd ../phoenix_ui && mix test
@@ -92,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
