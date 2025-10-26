@@ -15,12 +15,17 @@ defmodule Orchestrator.MixProject do
   def application do
     [
       mod: {Orchestrator.Application, []},
-      extra_applications: [:logger, :runtime_tools, :os_mon]
+      extra_applications: [:logger, :runtime_tools, :os_mon, :oban, :phoenix]
     ]
   end
 
   defp deps do
     [
+      {:phoenix, "~> 1.7"},
+      {:phoenix_html, "~> 4.1"},
+      {:phoenix_live_view, "~> 1.1.0"},
+      {:plug_cowboy, "~> 2.7"},
+      {:cors_plug, "~> 3.0"},
       {:ecto_sql, "~> 3.11"},
       {:postgrex, ">= 0.0.0"},
       {:finch, "~> 0.13"},

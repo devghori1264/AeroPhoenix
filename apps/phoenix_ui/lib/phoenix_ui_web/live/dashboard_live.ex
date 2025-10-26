@@ -94,10 +94,83 @@ defmodule PhoenixUiWeb.DashboardLive do
   end
 
   @impl true
-  def handle_event("create", %{"name" => name, "region" => region}, socket) do
+  def handle_event("create", %{"name" => name, "region" => region} = _params, socket)
+      when is_binary(name) and is_binary(region) do
+    do_create_machine(name, region, socket)
+  end
+
+  def handle_event("create", %{"name" => name} = _params, socket) when is_binary(name) do
+    region = default_region(socket.assigns.regions)
+    do_create_machine(name, region, socket)
+  end
+
+  def handle_event("create", %{"value" => encoded} = _params, socket) when is_binary(encoded) do
+    params = URI.decode_query(encoded)
+    name = Map.get(params, "name")
+    region = Map.get(params, "region") || default_region(socket.assigns.regions)
+
+    cond do
+      is_binary(name) and name != "" -> do_create_machine(name, region, socket)
+      true ->
+        Logger.warning("dashboard:create - invalid form payload: #{inspect(params)}")
+        {:noreply, socket |> put_flash(:error, "Invalid create form")}
+    end
+  end
+
+  def handle_event("create", params, socket) do
+    Logger.warning("dashboard:create - unexpected params: #{inspect(params)}")
+    {:noreply, socket |> put_flash(:error, "Invalid input")}
+  end
+
+  def handle_event("select_machine", %{"id" => id}, socket), do: do_select(id, socket)
+  def handle_event("select-machine", %{"id" => id}, socket), do: do_select(id, socket)
+
+  @impl true
+  def handle_event("refresh-machine", %{"id" => id}, socket) do
     Task.start(fn ->
-      case FlydClient.create_machine(name, region) do
+      case FlydClient.get_machine(id) do
+        {:ok, _} -> :ok
+        {:error, reason} -> Logger.warning("refresh-machine failed: #{inspect(reason)}")
+      end
+    end)
+    {:noreply, socket}
+  end
+
+  def handle_event("copy-cli", %{"cmd" => cmd}, socket) do
+    push_event(socket, "copy-cli", %{cmd: cmd})
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("action", %{"id" => id, "action" => action} = payload, socket) do
+    Task.start(fn ->
+      :telemetry.execute([:aerophoenix, :ui, :action], %{}, %{action: action, id: id})
+      case safe_call(fn ->
+              OrchestratorClient.action(id, Map.put(Map.drop(payload, ["id", "action"]), "action", action))
+            end) do
+        {:ok, _} -> Logger.info("Action #{action} for #{id} succeeded")
+        {:error, r} -> Logger.warning("Action #{action} for #{id} failed: #{inspect(r)}")
+      end
+    end)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("refresh", _params, socket) do
+    case OrchestratorClient.topology() do
+      {:ok, topo} ->
+        send(PhoenixUi.Machines, {:populate_topology, topo})
+        {:noreply, assign(socket, machines: Machines.list_all(), topology: topo)}
+      {:error, _} ->
+        {:noreply, assign(socket, error: "Orchestrator unreachable")}
+    end
+  end
+
+  defp do_create_machine(name, region, socket) do
+    Task.start(fn ->
+      case safe_call(fn -> FlydClient.create_machine(name, region) end) do
         {:ok, %{"id" => id}} -> Logger.info("Created machine #{id} in #{region}")
+        {:ok, other} -> Logger.info("Create returned: #{inspect(other)}")
         {:error, reason} -> Logger.warning("Create machine failed: #{inspect(reason)}")
       end
     end)
@@ -117,52 +190,7 @@ defmodule PhoenixUiWeb.DashboardLive do
 
     :telemetry.execute([:aerophoenix, :ui, :create], %{count: 1}, %{region: region, name: name})
     push_event(socket, "topology:update", %{regions: regions, machines: machines})
-
     {:noreply, assign(socket, machines: machines, regions: regions)}
-  end
-
-  def handle_event("select_machine", %{"id" => id}, socket), do: do_select(id, socket)
-  def handle_event("select-machine", %{"id" => id}, socket), do: do_select(id, socket)
-
-  @impl true
-  def handle_event("refresh-machine", %{"id" => id}, socket) do
-    Task.start(fn ->
-      case FlydClient.get_machine(id) do
-        {:ok, _} -> :ok
-        {:error, reason} -> Logger.warning("refresh-machine failed: #{inspect(reason)}")
-      end
-    end)
-
-    {:noreply, socket}
-  end
-
-  def handle_event("copy-cli", %{"cmd" => cmd}, socket) do
-    push_event(socket, "copy-cli", %{cmd: cmd})
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("action", %{"id" => id, "action" => action} = payload, socket) do
-    Task.start(fn ->
-      :telemetry.execute([:aerophoenix, :ui, :action], %{}, %{action: action, id: id})
-      case safe_call(fn -> OrchestratorClient.action(id, Map.put(Map.drop(payload, ["id", "action"]), "action", action)) end) do
-        {:ok, _} -> Logger.info("Action #{action} for #{id} succeeded")
-        {:error, r} -> Logger.warning("Action #{action} for #{id} failed: #{inspect(r)}")
-      end
-    end)
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("refresh", _params, socket) do
-    case OrchestratorClient.topology() do
-      {:ok, topo} ->
-        send(PhoenixUi.Machines, {:populate_topology, topo})
-        {:noreply, assign(socket, machines: Machines.list_all(), topology: topo)}
-      {:error, _} ->
-        {:noreply, assign(socket, error: "Orchestrator unreachable")}
-    end
   end
 
   defp do_select(id, socket) do
@@ -172,14 +200,12 @@ defmodule PhoenixUiWeb.DashboardLive do
         %{id: i} -> i == id
         _ -> false
       end)
-
     {:noreply, assign(socket, selected: selected)}
   end
 
   defp upsert_machine(list, new_machine) when is_list(list) do
     normalized = normalize_machine_payload(new_machine)
     existing_ids = Enum.map(list, fn m -> m[:id] || m["id"] end)
-
     if normalized.id in existing_ids do
       Enum.map(list, fn m ->
         if (m[:id] || m["id"]) == normalized.id, do: normalized, else: m
@@ -198,6 +224,11 @@ defmodule PhoenixUiWeb.DashboardLive do
       end
     end)
   end
+
+  defp default_region(regions) when is_list(regions) and regions != [] do
+    hd(regions) |> Map.get(:name) || hd(regions) |> Map.get("name")
+  end
+  defp default_region(_), do: "us-east"
 
   defp safe_call(fun) do
     try do
@@ -277,9 +308,10 @@ defmodule PhoenixUiWeb.DashboardLive do
     cpu = parse_num(get_in_map(m, ["cpu", :cpu]) || get_in_map(m, ["cpu_percent", :cpu_percent]) || 0)
     memory_mb = parse_num(get_in_map(m, ["memory_mb", :memory_mb]) || 0)
     latency = parse_num(get_in_map(m, ["latency_ms", :latency_ms]) || get_in_map(m, ["latency", :latency]) || 0)
-    updated_at = get_in_map(m, ["updated_at", :updated_at]) ||
-                 get_in_map(m, ["created_at", :created_at]) ||
-                 DateTime.to_iso8601(DateTime.utc_now())
+    updated_at =
+      get_in_map(m, ["updated_at", :updated_at]) ||
+      get_in_map(m, ["created_at", :created_at]) ||
+      DateTime.to_iso8601(DateTime.utc_now())
 
     %{
       id: id,

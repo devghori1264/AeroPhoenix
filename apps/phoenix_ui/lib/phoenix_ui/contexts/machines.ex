@@ -66,15 +66,15 @@ defmodule PhoenixUi.Machines do
   end
 
   def handle_info(:refresh, state) do
-    with {:ok, %{"machines" => machines}} <- OrchestratorClient.topology(),
-          true <- is_list(machines) do
-      Enum.each(machines, &upsert/1)
-    else
-      error -> Logger.debug("Topology refresh failed: #{inspect(error)}")
-    end
-
-    schedule_refresh()
-    {:noreply, state}
+      with {:ok, %{"topology" => region_list}} <- OrchestratorClient.topology(),
+          machines <- Enum.flat_map(region_list, & &1["machines"]) do
+        Logger.debug("Topology refresh successful, upserting #{Enum.count(machines)} machines.")
+        Enum.each(machines, &upsert/1)
+      else
+        error -> Logger.error("Topology refresh failed: #{inspect(error)}")
+      end
+      schedule_refresh()
+      {:noreply, state}
   end
 
   def handle_info({:machine_update, machine}, state) when is_map(machine) do
@@ -95,7 +95,7 @@ defmodule PhoenixUi.Machines do
     raw |> Map.new(fn {k, v} -> {to_string(k), v} end) |> upsert()
   end
 
-  defp normalize_machine(m) do
+  def normalize_machine(m) do
     %{
       id: to_str(m["id"]),
       name: m["name"] || m["id"],
