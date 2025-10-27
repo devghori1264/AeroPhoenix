@@ -23,30 +23,31 @@ defmodule PhoenixUiWeb.OrchestratorClient do
   defp request(method, path, body \\ nil, attempt \\ 1)
   defp request(_method, _path, _body, attempt) when attempt > 4, do: {:error, :max_retries}
 
-  defp request(method, path, body, attempt) do
+defp request(method, path, body, attempt) do
     url = @base <> path
     headers = [
       {"content-type", "application/json"},
       {"authorization", "Bearer #{@token}"}
     ]
 
-    req =
-      case body do
-        nil -> Finch.build(method, url, headers)
-        _ -> Finch.build(method, url, headers, Jason.encode!(body))
+    require OpenTelemetry.Tracer
+    OpenTelemetry.Tracer.with_span "orch.request", %{attributes: [{"http.method", to_string(method)}, {"http.url", url}]} do
+      req =
+        case body do
+          nil -> Finch.build(method, url, headers)
+          _ -> Finch.build(method, url, headers, Jason.encode!(body))
+        end
+
+      case Finch.request(req, PhoenixUiWeb.Finch, receive_timeout: @timeout) do
+        {:ok, %Response{status: s, body: b}} when s in 200..299 ->
+          decode_body(b)
+        {:ok, %Response{status: s, body: b}} ->
+          Logger.warning("[OrchestratorClient] Non-2xx status #{s} for #{path}: #{b}")
+          backoff_and_retry(method, path, body, attempt)
+        {:error, reason} ->
+          Logger.warning("[OrchestratorClient] Request error: #{inspect(reason)} attempt=#{attempt}")
+          backoff_and_retry(method, path, body, attempt)
       end
-
-    case Finch.request(req, PhoenixUiWeb.Finch, receive_timeout: @timeout) do
-      {:ok, %Response{status: s, body: b}} when s in 200..299 ->
-        decode_body(b)
-
-      {:ok, %Response{status: s, body: b}} ->
-        Logger.warning("[OrchestratorClient] Non-2xx status #{s} for #{path}: #{b}")
-        backoff_and_retry(method, path, body, attempt)
-
-      {:error, reason} ->
-        Logger.warning("[OrchestratorClient] Request error: #{inspect(reason)} attempt=#{attempt}")
-        backoff_and_retry(method, path, body, attempt)
     end
   end
 

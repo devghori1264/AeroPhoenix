@@ -1,17 +1,23 @@
 defmodule Orchestrator.Application do
-  @moduledoc false
   use Application
+  require Logger
 
   @impl true
   def start(_type, _args) do
+    Logger.info("Starting Orchestrator Application...")
+
     children = [
       Orchestrator.Repo,
       {Finch, name: Orchestrator.Finch},
-      {TelemetryMetricsPrometheus, metrics: Orchestrator.Metrics.metrics(), port: 9568, path: "/metrics"},
-      if(Mix.env() != :test, do: Orchestrator.Manager),
+      Orchestrator.MachineManager,
+      Orchestrator.NatsListener,
+      {TelemetryMetricsPrometheus,
+        metrics: Orchestrator.Metrics.metrics(),
+        port: telemetry_port(),
+        path: "/metrics"},
       OrchestratorWeb.Endpoint
     ]
-    children = Enum.reject(children, &is_nil/1)
+
     opts = [strategy: :one_for_one, name: Orchestrator.Supervisor]
     Supervisor.start_link(children, opts)
   end
@@ -21,4 +27,6 @@ defmodule Orchestrator.Application do
     OrchestratorWeb.Endpoint.config_change(changed, removed)
     :ok
   end
+
+  defp telemetry_port, do: String.to_integer(System.get_env("TELEMETRY_PORT", "9568"))
 end

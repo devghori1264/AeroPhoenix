@@ -1,0 +1,26 @@
+{
+    "annotations": {"list": []},
+    "editable": true,
+    "panels": [
+        {
+            "type":"graph",
+            "title":"Phoenix Endpoint Duration (ms)",
+            "targets":[{"expr":"phoenix_endpoint_stop_duration_sum / phoenix_endpoint_stop_duration_count * 1000", "refId":"A"}],
+            "gridPos":{"h":8,"w":12,"x":0,"y":0}
+        },
+        {
+            "type":"stat",
+            "title":"UI Actions (total)",
+            "targets":[{"expr":"sum(aerophoenix_ui_actions_count)","refId":"B"}],
+            "gridPos":{"h":4,"w":6,"x":12,"y":0}
+        },
+        {
+            "type":"stat",
+            "title":"Machine Updates/s",
+            "targets":[{"expr":"rate(aerophoenix_machines_updates[1m])","refId":"C"}],
+            "gridPos":{"h":4,"w":6,"x":18,"y":0}
+        }
+    ],
+    "schemaVersion": 30,
+    "title": "AeroPhoenix Overview"
+}

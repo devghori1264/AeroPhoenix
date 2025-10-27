@@ -18,7 +18,7 @@ defmodule PhoenixUi.MixProject do
   def application do
     [
       mod: {PhoenixUi.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger,:runtime_tools, :gnat, :telemetry_metrics_prometheus, :tls_certificate_check]
     ]
   end
 
@@ -45,12 +45,12 @@ defmodule PhoenixUi.MixProject do
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:heroicons,
-       github: "tailwindlabs/heroicons",
-       tag: "v2.2.0",
-       sparse: "optimized",
-       app: false,
-       compile: false,
-       depth: 1},
+        github: "tailwindlabs/heroicons",
+        tag: "v2.2.0",
+        sparse: "optimized",
+        app: false,
+        compile: false,
+        depth: 1},
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
@@ -68,7 +68,11 @@ defmodule PhoenixUi.MixProject do
       {:oban, "~> 2.16", only: :prod},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:telemetry, "~> 1.2"},
-      {:uuid, "~> 1.1"}
+      {:uuid, "~> 1.1"},
+      {:opentelemetry, "~> 1.0"},
+      {:opentelemetry_api, "~> 1.0"},
+      {:opentelemetry_exporter, "~> 1.0"},
+      {:gnat, "~> 1.6"},
     ]
   end
 

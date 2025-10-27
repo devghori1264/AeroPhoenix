@@ -146,12 +146,14 @@ defmodule PhoenixUiWeb.DashboardLive do
     Task.start(fn ->
       :telemetry.execute([:aerophoenix, :ui, :action], %{}, %{action: action, id: id})
       case safe_call(fn ->
-              OrchestratorClient.action(id, Map.put(Map.drop(payload, ["id", "action"]), "action", action))
-            end) do
+            OrchestratorClient.action(id, Map.put(Map.drop(payload, ["id", "action"]), "action", action))
+          end) do
         {:ok, _} -> Logger.info("Action #{action} for #{id} succeeded")
         {:error, r} -> Logger.warning("Action #{action} for #{id} failed: #{inspect(r)}")
       end
     end)
+    nats_payload = %{user: "dev", action: action, id: id, ts: DateTime.utc_now() |> DateTime.to_iso8601()}
+    PhoenixUiWeb.NatsClient.publish("ui.actions", nats_payload)
     {:noreply, socket}
   end
 

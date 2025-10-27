@@ -36,13 +36,17 @@ defmodule Orchestrator.MixProject do
       {:nx, "~> 0.6.4"},
       {:oban, "~> 2.16"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.30", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.30", only: :dev, runtime: false},
+      {:gnat, "~> 1.6"},
+      {:opentelemetry, "~> 1.0"},
+      {:retry, "~> 0.16"}
     ]
   end
 
   defp aliases do
     [
-      "ecto.setup": ["ecto.create", "ecto.migrate"]
+      "ecto.setup": ["ecto.create", "ecto.migrate"],
+      "ecto.reset": ["ecto.drop", "ecto.setup"]
     ]
   end
 end
