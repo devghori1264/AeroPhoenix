@@ -1,15 +1,8 @@
 defmodule Orchestrator.Client do
-  @moduledoc """
-  Lightweight HTTP client to interact with flyd-sim HTTP shim.
-  """
-
   require Logger
   alias Finch.Response
-
-  @base Application.compile_env!(:orchestrator, :http)[:base_url]
-
+  defp base_url, do: Application.get_env(:orchestrator, :http)[:base_url]
   @default_headers [{"content-type", "application/json"}]
-
   def ping do
     url("/ping")
     |> get()
@@ -17,6 +10,7 @@ defmodule Orchestrator.Client do
 
   def create_machine(name, region) do
     body = %{"name" => name, "region" => region} |> Jason.encode!()
+
     url("/create")
     |> post(body)
   end
@@ -25,17 +19,18 @@ defmodule Orchestrator.Client do
     url("/get?id=#{id}") |> get()
   end
 
-  # internal helpers
-
-  defp url(path), do: "#{@base}#{path}"
+  defp url(path), do: "#{base_url()}#{path}"
 
   defp get(url) do
     req = Finch.build(:get, url, @default_headers)
+
     case Finch.request(req, Orchestrator.Finch, receive_timeout: 5_000) do
       {:ok, %Response{status: status, body: body}} when status in 200..299 ->
         {:ok, Jason.decode!(body)}
+
       {:ok, %Response{status: status}} ->
         {:error, {:http_error, status}}
+
       {:error, reason} ->
         {:error, reason}
     end
@@ -43,6 +38,7 @@ defmodule Orchestrator.Client do
 
   defp post(url, body) do
     req = Finch.build(:post, url, @default_headers, body)
+
     case Finch.request(req, Orchestrator.Finch, receive_timeout: 5_000) do
       {:ok, %Response{status: 200, body: body}} -> {:ok, Jason.decode!(body)}
       {:ok, %Response{status: s}} -> {:error, {:http_error, s}}

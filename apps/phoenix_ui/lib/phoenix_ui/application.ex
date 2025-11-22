@@ -26,7 +26,6 @@ defmodule PhoenixUi.Application do
   end
 
   defp setup_opentelemetry do
-    :otel_batch_processor.set_exporter(:otel_exporter_stdout, [])
     PhoenixUi.OpenTelemetrySetup.setup()
     :ok
   end

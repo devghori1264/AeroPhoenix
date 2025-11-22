@@ -6,7 +6,8 @@ defmodule PhoenixUi.Machines do
   @table :phoenix_ui_machines
   @metrics_table :phoenix_ui_machine_metrics
   @pubsub_topic "phoenix:machines"
-  @refresh_interval_ms Application.compile_env(:phoenix_ui, :topology, [])[:refresh_interval_ms] || 1_000
+  @refresh_interval_ms Application.compile_env(:phoenix_ui, :topology, [])[:refresh_interval_ms] ||
+                         1_000
   @metrics_capacity 120
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
@@ -24,6 +25,20 @@ defmodule PhoenixUi.Machines do
     case :ets.lookup(@table, id) do
       [{^id, v}] -> {:ok, v}
       _ -> :not_found
+    end
+  end
+
+  @spec delete(String.t()) :: {:ok, :deleted} | {:error, :not_found}
+  def delete(id) do
+    case :ets.lookup(@table, id) do
+      [{^id, _v}] ->
+        :ets.delete(@table, id)
+        :ets.delete(@metrics_table, id)
+        Phoenix.PubSub.broadcast(PhoenixUi.PubSub, @pubsub_topic, {:machine_deleted, id})
+        {:ok, :deleted}
+
+      _ ->
+        {:error, :not_found}
     end
   end
 
@@ -66,15 +81,42 @@ defmodule PhoenixUi.Machines do
   end
 
   def handle_info(:refresh, state) do
-      with {:ok, %{"topology" => region_list}} <- OrchestratorClient.topology(),
-          machines <- Enum.flat_map(region_list, & &1["machines"]) do
-        Logger.debug("Topology refresh successful, upserting #{Enum.count(machines)} machines.")
-        Enum.each(machines, &upsert/1)
-      else
-        error -> Logger.error("Topology refresh failed: #{inspect(error)}")
-      end
-      schedule_refresh()
-      {:noreply, state}
+    with {:ok, %{"topology" => region_list}} <- OrchestratorClient.topology() do
+      machines =
+        Enum.flat_map(region_list, fn region_map ->
+          region = Map.get(region_map, "region", "unknown")
+
+          Map.get(region_map, "machines", [])
+          |> Enum.map(fn m -> Map.put(m, "region", region) end)
+        end)
+
+      Logger.debug("Topology refresh successful, upserting #{Enum.count(machines)} machines.")
+      Enum.each(machines, &upsert/1)
+    else
+      error -> Logger.error("Topology refresh failed: #{inspect(error)}")
+    end
+
+    schedule_refresh()
+    {:noreply, state}
+  end
+
+  def handle_info({:populate_topology, %{"topology" => topology_list}}, state)
+      when is_list(topology_list) do
+    Logger.debug("[Machines] Received :populate_topology with #{length(topology_list)} regions")
+
+    machines =
+      topology_list
+      |> Enum.flat_map(fn region_map ->
+        region = Map.get(region_map, "region", "unknown")
+
+        Map.get(region_map, "machines", [])
+        |> Enum.map(fn m -> Map.put(m, "region", region) end)
+      end)
+
+    Enum.each(machines, &upsert/1)
+    Phoenix.PubSub.broadcast(PhoenixUi.PubSub, "topology", {:topology_updated, list_all()})
+
+    {:noreply, state}
   end
 
   def handle_info({:machine_update, machine}, state) when is_map(machine) do
@@ -119,6 +161,7 @@ defmodule PhoenixUi.Machines do
 
   defp to_float(nil), do: 0.0
   defp to_float(n) when is_number(n), do: n * 1.0
+
   defp to_float(s) when is_binary(s) do
     case Float.parse(s) do
       {v, _} -> v
@@ -127,6 +170,7 @@ defmodule PhoenixUi.Machines do
   end
 
   defp parse_datetime(nil), do: DateTime.utc_now()
+
   defp parse_datetime(s) when is_binary(s) do
     case DateTime.from_iso8601(s) do
       {:ok, dt, _} -> dt
@@ -137,10 +181,18 @@ defmodule PhoenixUi.Machines do
   defp insert_metric(machine_id, metric) do
     ts =
       case metric[:ts] || metric["ts"] do
-        %DateTime{} = dt -> dt
+        %DateTime{} = dt ->
+          dt
+
         s when is_binary(s) ->
-          case DateTime.from_iso8601(s), do: ({:ok, dt, _} -> dt; _ -> DateTime.utc_now())
-        _ -> DateTime.utc_now()
+          case DateTime.from_iso8601(s),
+            do: (
+              {:ok, dt, _} -> dt
+              _ -> DateTime.utc_now()
+            )
+
+        _ ->
+          DateTime.utc_now()
       end
 
     sample = %{
@@ -162,6 +214,7 @@ defmodule PhoenixUi.Machines do
 
   defp add_to_queue(q, item) do
     q2 = :queue.in(item, q)
+
     if :queue.len(q2) > @metrics_capacity do
       {_drop, q3} = :queue.out(q2)
       q3
@@ -171,8 +224,10 @@ defmodule PhoenixUi.Machines do
   end
 
   defp avg_latency(machines) when is_list(machines) and machines != [] do
-    Enum.reduce(machines, 0.0, fn m, acc -> acc + (m.latency || 0.0) end) / max(1, length(machines))
+    Enum.reduce(machines, 0.0, fn m, acc -> acc + (m.latency || 0.0) end) /
+      max(1, length(machines))
   end
+
   defp avg_latency(_), do: 0.0
 
   defp estimated_link_latency(_src, _dst), do: 100 + :rand.uniform(80)

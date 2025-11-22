@@ -1,0 +1,120 @@
+groups:
+  - name: multi_region_health
+    interval: 30s
+    rules:
+      - alert: RegionDown
+        expr: up{component="flyd-sim"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: flyd-sim
+        annotations:
+          summary: "Region {{ $labels.region }} is down"
+          description: "flyd-sim instance in {{ $labels.region }} has been unreachable for 1 minute"
+
+      - alert: RegionHighLatency
+        expr: histogram_quantile(0.95, rate(flyd_api_duration_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          component: flyd-sim
+        annotations:
+          summary: "High API latency in {{ $labels.region }}"
+          description: "95th percentile API latency is {{ $value }}s in {{ $labels.region }}"
+
+      - alert: RegionCapacityHigh
+        expr: (flyd_machines_total{region=~".+"} / 100) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: flyd-sim
+        annotations:
+          summary: "Region {{ $labels.region }} approaching capacity"
+          description: "{{ $labels.region }} is at {{ $value }}% capacity"
+
+      - alert: MigrationFailureRateHigh
+        expr: rate(flyd_migrations_total{result="failed"}[10m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: migration
+        annotations:
+          summary: "High migration failure rate"
+          description: "Migration failure rate is {{ $value }} failures/sec"
+
+      - alert: MigrationStuck
+        expr: flyd_migrations_duration_seconds > 600
+        for: 1m
+        labels:
+          severity: critical
+          component: migration
+        annotations:
+          summary: "Migration appears stuck"
+          description: "Migration has been running for {{ $value }}s (>10 minutes)"
+
+      - alert: CrossRegionLatencyHigh
+        expr: histogram_quantile(0.95, rate(flyd_cross_region_latency_seconds_bucket[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "High cross-region latency detected"
+          description: "95th percentile cross-region latency is {{ $value }}s"
+
+      - alert: MachineCreateFailureSpike
+        expr: rate(flyd_machine_created_total{status="error"}[5m]) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+          component: machines
+        annotations:
+          summary: "High machine creation failure rate"
+          description: "Machine creation failures at {{ $value }}/sec in {{ $labels.region }}"
+
+  - name: multi_region_recording_rules
+    interval: 30s
+    rules:
+      - record: aerophoenix:machines:total
+        expr: sum(flyd_machines_total)
+
+      - record: aerophoenix:machines:by_region
+        expr: sum by (region) (flyd_machines_total)
+
+      - record: aerophoenix:machines:by_status
+        expr: sum by (status) (flyd_machines_total)
+
+      - record: aerophoenix:migrations:success_rate
+        expr: |
+          sum(rate(flyd_migrations_total{result="success"}[5m]))
+          /
+          sum(rate(flyd_migrations_total[5m]))
+
+      - record: aerophoenix:api:requests_per_second
+        expr: sum by (region) (rate(flyd_api_requests_total[1m]))
+
+      - record: aerophoenix:api:p95_latency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (region, le) (rate(flyd_api_duration_seconds_bucket[5m]))
+          )
+
+      - record: aerophoenix:api:p99_latency
+        expr: |
+          histogram_quantile(0.99,
+            sum by (region, le) (rate(flyd_api_duration_seconds_bucket[5m]))
+          )
+
+      - record: aerophoenix:region:capacity_percent
+        expr: (flyd_machines_total / 100) * 100
+
+      - record: aerophoenix:migration:avg_duration_seconds
+        expr: |
+          avg by (strategy) (
+            rate(flyd_migrations_duration_seconds_sum[10m])
+            /
+            rate(flyd_migrations_duration_seconds_count[10m])
+          )
+
+      - record: aerophoenix:migration:bytes_per_second
+        expr: sum by (region) (rate(flyd_migration_bytes_transferred_total[5m]))

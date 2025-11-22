@@ -6,71 +6,347 @@ services:
     environment:
       POSTGRES_USER: aerouser
       POSTGRES_PASSWORD: aeropass
-      POSTGRES_DB: aerophoenix_dev
+      POSTGRES_DB: aerophoenix_orch_dev
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aerouser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   nats:
     image: nats:2.9.4
     ports:
       - "4222:4222"
       - "8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
-  flyd-sim:
+
+  flyd-sim-us-east-1:
     build:
       context: ../apps/flyd-sim
       dockerfile: Dockerfile
+    container_name: flyd-sim-us-east-1
     environment:
       - NATS_URL=nats://nats:4222
+      - REGION=us-east-1
+      - GRPC_PORT=50051
+      - HTTP_PORT=8080
+      - METRICS_PORT=9090
+      - REGION_LATENCY_BASE_MS=0
+      - MACHINE_CAPACITY=100
     volumes:
-      - ../apps/flyd-sim/data:/data
+      - flyd_us_east_1_data:/data
     ports:
       - "50051:50051"
       - "8080:8080"
       - "9090:9090"
     depends_on:
-      - postgres
-      - nats
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - aerophoenix
+    labels:
+      region: "us-east-1"
+      service: "flyd-sim"
+      tier: "compute"
+
+  flyd-sim-eu-west-1:
+    build:
+      context: ../apps/flyd-sim
+      dockerfile: Dockerfile
+    container_name: flyd-sim-eu-west-1
+    environment:
+      - NATS_URL=nats://nats:4222
+      - REGION=eu-west-1
+      - GRPC_PORT=50052
+      - HTTP_PORT=8081
+      - METRICS_PORT=9091
+      - REGION_LATENCY_BASE_MS=85
+      - MACHINE_CAPACITY=100
+    volumes:
+      - flyd_eu_west_1_data:/data
+    ports:
+      - "50052:50052"
+      - "8081:8081"
+      - "9091:9091"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - aerophoenix
+    labels:
+      region: "eu-west-1"
+      service: "flyd-sim"
+      tier: "compute"
+
+  flyd-sim-ap-south-1:
+    build:
+      context: ../apps/flyd-sim
+      dockerfile: Dockerfile
+    container_name: flyd-sim-ap-south-1
+    environment:
+      - NATS_URL=nats://nats:4222
+      - REGION=ap-south-1
+      - GRPC_PORT=50053
+      - HTTP_PORT=8082
+      - METRICS_PORT=9092
+      - REGION_LATENCY_BASE_MS=165
+      - MACHINE_CAPACITY=100
+    volumes:
+      - flyd_ap_south_1_data:/data
+    ports:
+      - "50053:50053"
+      - "8082:8082"
+      - "9092:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - aerophoenix
+    labels:
+      region: "ap-south-1"
+      service: "flyd-sim"
+      tier: "compute"
+
+  flyd-sim-us-west-2:
+    build:
+      context: ../apps/flyd-sim
+      dockerfile: Dockerfile
+    container_name: flyd-sim-us-west-2
+    environment:
+      - NATS_URL=nats://nats:4222
+      - REGION=us-west-2
+      - GRPC_PORT=50054
+      - HTTP_PORT=8083
+      - METRICS_PORT=9093
+      - REGION_LATENCY_BASE_MS=65
+      - MACHINE_CAPACITY=100
+    volumes:
+      - flyd_us_west_2_data:/data
+    ports:
+      - "50054:50054"
+      - "8083:8083"
+      - "9094:9093"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8083/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - aerophoenix
+    labels:
+      region: "us-west-2"
+      service: "flyd-sim"
+      tier: "compute"
+
+  region-registry:
+    image: consul:1.16
+    container_name: region-registry
+    command: agent -dev -ui -client=0.0.0.0 -bind=0.0.0.0
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    networks:
+      - aerophoenix
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    volumes:
+      - consul_data:/consul/data
+    labels:
+      service: "consul"
+      tier: "infrastructure"
+
+  region-router:
+    build:
+      context: .
+      dockerfile: Dockerfile.router
+    container_name: region-router
+    environment:
+      - CONSUL_HTTP_ADDR=region-registry:8500
+      - HEALTH_CHECK_INTERVAL=10s
+      - LATENCY_AWARE_ROUTING=true
+      - ENABLE_CIRCUIT_BREAKER=true
+    ports:
+      - "8000:8000"
+      - "50050:50050"
+    depends_on:
+      - region-registry
+      - flyd-sim-us-east-1
+      - flyd-sim-eu-west-1
+      - flyd-sim-ap-south-1
+      - flyd-sim-us-west-2
+    networks:
+      - aerophoenix
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    labels:
+      service: "router"
+      tier: "gateway"
 
   net-sim:
     build:
       context: ../apps/net-sim
+    container_name: net-sim-chaos
     environment:
-      - FLYD_SIM_BASE=http://flyd-sim:8080
+      - FLYD_SIM_BASE=http://flyd-sim-us-east-1:8080
+      - RUST_LOG=info
+      - ENABLE_LATENCY_INJECTION=true
+      - ENABLE_PACKET_LOSS=false
+      - ENABLE_NETWORK_PARTITION=false
     ports:
       - "7070:7070"
     depends_on:
-      - flyd-sim
+      - flyd-sim-us-east-1
+      - flyd-sim-eu-west-1
+      - flyd-sim-ap-south-1
+      - flyd-sim-us-west-2
+    networks:
+      - aerophoenix
+    restart: unless-stopped
+    labels:
+      service: "chaos-engineering"
+      tier: "testing"
 
   prometheus:
     image: prom/prometheus:v2.44.0
+    container_name: prometheus
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
     ports:
-      - "9090:9090"
+      - "9093:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - aerophoenix
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   grafana:
     image: grafana/grafana:10.0.0
+    container_name: grafana
     environment:
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/multi-region-overview.json
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
     ports:
       - "3000:3000"
     depends_on:
       - prometheus
+    networks:
+      - aerophoenix
     restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otel_collect.yml"]
+    volumes:
+      - ./otel_collect.yml:/etc/otel_collect.yml
+    ports:
+      - "4318:4318"
+      - "4317:4317"
+      - "8889:8889"
+      - "13133:13133"
+    networks:
+      - aerophoenix
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  aerophoenix:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 volumes:
   postgres_data:
+  redis_data:
+  flyd_us_east_1_data:
+  flyd_eu_west_1_data:
+  flyd_ap_south_1_data:
+  flyd_us_west_2_data:
+  consul_data:
+  prometheus_data:
+  grafana_data:

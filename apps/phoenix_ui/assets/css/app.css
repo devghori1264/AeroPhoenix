@@ -1,31 +1,24 @@
-/* See the Tailwind configuration guide for advanced usage
-   https://tailwindcss.com/docs/configuration */
-
 @import "tailwindcss";
+@import "./tokens.css";
+
 @layer base {
   html, body {
     @apply bg-gray-950 text-gray-50 font-sans;
+    background: var(--bg);
+    color: var(--text);
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
 }
 @source "../css";
 @source "../js";
 @source "../../lib/phoenix_ui_web";
 
-/* A Tailwind plugin that makes "hero-#{ICON}" classes available.
-   The heroicons installation itself is managed by your mix.exs */
 @plugin "../vendor/heroicons";
 
-/* daisyUI Tailwind Plugin. You can update this file by fetching the latest version with:
-   curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui.js
-   Make sure to look at the daisyUI changelog: https://daisyui.com/docs/changelog/ */
 @plugin "../vendor/daisyui" {
   themes: false;
 }
 
-/* daisyUI theme plugin. You can update this file by fetching the latest version with:
-  curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui-theme.js
-  We ship with two themes, a light one inspired on Phoenix colors and a dark one inspired
-  on Elixir colors. Build your own at: https://daisyui.com/theme-generator/ */
 @plugin "../vendor/daisyui-theme" {
   name: "dark";
   default: false;
@@ -102,15 +95,281 @@
   --color-brand-700: #0055cc;
 }
 
-/* Add variants based on LiveView classes */
 @custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
 @custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
 @custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
 
-/* Use the data attribute for dark mode  */
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-/* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
-/* This file is for your main application CSS */
+.notification-item {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-direction: row;
+  gap: 1em;
+  overflow: hidden;
+  padding: 10px 15px;
+  border-radius: 6px;
+  box-shadow: rgba(111, 111, 111, 0.2) 0px 8px 24px;
+  transition: all 250ms ease;
+  animation: slideInRight 0.3s ease-out;
+}
+
+.notification-item svg {
+  transition: 250ms ease;
+}
+
+.notification-item:hover {
+  transform: scale(1.01);
+}
+
+.notification-item:active {
+  transform: scale(1.05);
+}
+
+.notification-item .notification-close:hover {
+  background-color: rgba(204, 204, 204, 0.45);
+  border-radius: 5px;
+}
+
+.notification-item .notification-close:hover svg {
+  color: rgb(0, 0, 0);
+}
+
+.notification-item .notification-close:active svg {
+  transform: scale(1.1);
+}
+
+.notification-item .notification-close {
+  padding: 2px;
+  border-radius: 5px;
+  transition: all 250ms;
+}
+
+.notification-icon {
+  display: flex;
+  align-items: center;
+}
+
+.notification-content {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.notification-success {
+  color: #047857;
+  background-color: #7dffbc;
+  --grid-color: rgba(16, 185, 129, 0.25);
+  background-image: linear-gradient(
+      0deg,
+      transparent 23%,
+      var(--grid-color) 24%,
+      var(--grid-color) 25%,
+      transparent 26%,
+      transparent 73%,
+      var(--grid-color) 74%,
+      var(--grid-color) 75%,
+      transparent 76%,
+      transparent
+    ),
+    linear-gradient(
+      90deg,
+      transparent 23%,
+      var(--grid-color) 24%,
+      var(--grid-color) 25%,
+      transparent 26%,
+      transparent 73%,
+      var(--grid-color) 74%,
+      var(--grid-color) 75%,
+      transparent 76%,
+      transparent
+    );
+  background-size: 55px 55px;
+}
+
+.notification-success svg {
+  color: #047857;
+}
+
+.notification-success .notification-progress-bar {
+  background-color: #047857;
+}
+
+.notification-success:hover {
+  background-color: #5bffaa;
+}
+
+.notification-error {
+  color: #7f1d1d;
+  background-color: #ff7e7e;
+  --grid-color: rgba(239, 68, 68, 0.25);
+  background-image: linear-gradient(
+      0deg,
+      transparent 23%,
+      var(--grid-color) 24%,
+      var(--grid-color) 25%,
+      transparent 26%,
+      transparent 73%,
+      var(--grid-color) 74%,
+      var(--grid-color) 75%,
+      transparent 76%,
+      transparent
+    ),
+    linear-gradient(
+      90deg,
+      transparent 23%,
+      var(--grid-color) 24%,
+      var(--grid-color) 25%,
+      transparent 26%,
+      transparent 73%,
+      var(--grid-color) 74%,
+      var(--grid-color) 75%,
+      transparent 76%,
+      transparent
+    );
+  background-size: 55px 55px;
+}
+
+.notification-error svg {
+  color: #7f1d1d;
+}
+
+.notification-error .notification-progress-bar {
+  background-color: #7f1d1d;
+}
+
+.notification-error:hover {
+  background-color: #ff5f5f;
+}
+
+.notification-warning {
+  color: #78350f;
+  background-color: #ffe57e;
+  --grid-color: rgba(245, 159, 11, 0.25);
+  background-image: linear-gradient(
+      0deg,
+      transparent 23%,
+      var(--grid-color) 24%,
+      var(--grid-color) 25%,
+      transparent 26%,
+      transparent 73%,
+      var(--grid-color) 74%,
+      var(--grid-color) 75%,
+      transparent 76%,
+      transparent
+    ),
+    linear-gradient(
+      90deg,
+      transparent 23%,
+      var(--grid-color) 24%,
+      var(--grid-color) 25%,
+      transparent 26%,
+      transparent 73%,
+      var(--grid-color) 74%,
+      var(--grid-color) 75%,
+      transparent 76%,
+      transparent
+    );
+  background-size: 55px 55px;
+}
+
+.notification-warning svg {
+  color: #78350f;
+}
+
+.notification-warning .notification-progress-bar {
+  background-color: #78350f;
+}
+
+.notification-warning:hover {
+  background-color: #ffde59;
+}
+
+.notification-info {
+  color: #1e3a8a;
+  background-color: #7eb8ff;
+  --grid-color: rgba(59, 131, 246, 0.25);
+  background-image: linear-gradient(
+      0deg,
+      transparent 23%,
+      var(--grid-color) 24%,
+      var(--grid-color) 25%,
+      transparent 26%,
+      transparent 73%,
+      var(--grid-color) 74%,
+      var(--grid-color) 75%,
+      transparent 76%,
+      transparent
+    ),
+    linear-gradient(
+      90deg,
+      transparent 23%,
+      var(--grid-color) 24%,
+      var(--grid-color) 25%,
+      transparent 26%,
+      transparent 73%,
+      var(--grid-color) 74%,
+      var(--grid-color) 75%,
+      transparent 76%,
+      transparent
+    );
+  background-size: 55px 55px;
+}
+
+.notification-info svg {
+  color: #1e3a8a;
+}
+
+.notification-info .notification-progress-bar {
+  background-color: #1e3a8a;
+}
+
+.notification-info:hover {
+  background-color: #5ba5ff;
+}
+
+.notification-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  width: 100%;
+  transform: translateX(0);
+  animation: progressBar 5s linear forwards;
+}
+
+@keyframes progressBar {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutRight {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+}

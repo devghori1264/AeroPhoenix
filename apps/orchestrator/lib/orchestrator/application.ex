@@ -8,13 +8,17 @@ defmodule Orchestrator.Application do
 
     children = [
       Orchestrator.Repo,
+      {Phoenix.PubSub, name: Orchestrator.PubSub},
       {Finch, name: Orchestrator.Finch},
+      {Registry, keys: :unique, name: Orchestrator.FSMRegistry},
+      Orchestrator.RegionRegistry,
+      Orchestrator.Migration.CircuitBreaker,
+      Orchestrator.ChaosEngine,
+      Orchestrator.Manager,
       Orchestrator.MachineManager,
       Orchestrator.NatsListener,
       {TelemetryMetricsPrometheus,
-        metrics: Orchestrator.Metrics.metrics(),
-        port: telemetry_port(),
-        path: "/metrics"},
+       metrics: Orchestrator.Metrics.metrics(), port: telemetry_port(), path: "/metrics"},
       OrchestratorWeb.Endpoint
     ]
 

@@ -25,7 +25,8 @@ defmodule PhoenixUiWeb.MetricsChartComponent do
         data-machine-id={@machine_id}
         width="400"
         height="200"
-        class="rounded bg-slate-900/50">
+        class="rounded bg-slate-900/50"
+      >
       </canvas>
     </div>
     """

@@ -25,4 +25,7 @@ defmodule PhoenixUiWeb.TelemetryMetrics do
       last_value("aerophoenix.machines.count")
     ]
   end
+
+  counter("chaos.incidents.count", tags: [:kind])
+  counter("planner.recommendations.count", tags: [:machine_id])
 end

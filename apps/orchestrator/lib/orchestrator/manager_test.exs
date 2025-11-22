@@ -21,7 +21,7 @@ defmodule Orchestrator.ManagerTest do
   test "predictor records samples and suggests migration when high" do
     id = Ecto.UUID.generate()
     # record simulated high latency samples
-    Enum.each([200,220,210,230,240], fn v -> Orchestrator.Predictor.record_sample(id, v) end)
+    Enum.each([200, 220, 210, 230, 240], fn v -> Orchestrator.Predictor.record_sample(id, v) end)
     assert {:migrate, _} = Orchestrator.Predictor.should_migrate?(id)
   end
 end

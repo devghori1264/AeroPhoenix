@@ -1,5 +1,4 @@
 defmodule PhoenixUiWeb.FlydClient do
-
   require Logger
   alias Finch.Response
 
@@ -18,8 +17,8 @@ defmodule PhoenixUiWeb.FlydClient do
   end
 
   @spec get_machine(String.t()) :: {:ok, map()} | {:error, any()}
-  def get_machine(id) do
-    get("/get?id=#{URI.encode_query(id)}")
+  def get_machine(id) when is_binary(id) do
+    get("/get?id=#{URI.encode_www_form(id)}")
   end
 
   @spec list_machines_by_region(String.t()) :: {:ok, [map()]} | {:error, any()}
@@ -70,13 +69,17 @@ defmodule PhoenixUiWeb.FlydClient do
 
   defp decode(nil), do: %{}
   defp decode(""), do: %{}
+
   defp decode(body) when is_binary(body) do
     case Jason.decode(body) do
       {:ok, val} ->
         val
 
       {:error, reason} ->
-        Logger.warning("[FlydClient] Failed to decode JSON response: #{inspect(reason)}. Raw body: #{inspect(body)}")
+        Logger.warning(
+          "[FlydClient] Failed to decode JSON response: #{inspect(reason)}. Raw body: #{inspect(body)}"
+        )
+
         %{"raw_body" => body}
     end
   end

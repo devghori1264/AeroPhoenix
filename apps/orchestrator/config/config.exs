@@ -1,11 +1,12 @@
 import Config
 config :orchestrator, ecto_repos: [Orchestrator.Repo]
 
-config :orchestrator, http: [
-  timeout: 5_000,
-  recv_timeout: 5_000,
-  base_url: System.get_env("FLYD_SIM_URL", "http://localhost:8080")
-]
+config :orchestrator,
+  http: [
+    timeout: 5_000,
+    recv_timeout: 5_000,
+    base_url: System.get_env("FLYD_SIM_URL", "http://localhost:8080")
+  ]
 
 config :orchestrator, OrchestratorWeb.Endpoint,
   http: [port: 4001],
@@ -17,7 +18,6 @@ config :orchestrator, OrchestratorWeb.Endpoint,
     layout: false
   ]
 
-config :orchestrator, Orchestrator.Predictor,
-  ema_alpha: 0.2
+config :orchestrator, Orchestrator.Predictor, ema_alpha: 0.2
 
 import_config "#{Mix.env()}.exs"

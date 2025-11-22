@@ -15,7 +15,15 @@ defmodule Orchestrator.MixProject do
   def application do
     [
       mod: {Orchestrator.Application, []},
-      extra_applications: [:logger, :runtime_tools, :os_mon, :oban, :phoenix]
+      extra_applications: [
+        :logger,
+        :runtime_tools,
+        :os_mon,
+        :oban,
+        :phoenix,
+        :gnat,
+        :tls_certificate_check
+      ]
     ]
   end
 
@@ -39,7 +47,9 @@ defmodule Orchestrator.MixProject do
       {:ex_doc, "~> 0.30", only: :dev, runtime: false},
       {:gnat, "~> 1.6"},
       {:opentelemetry, "~> 1.0"},
-      {:retry, "~> 0.16"}
+      {:opentelemetry_exporter, "~> 1.0"},
+      {:retry, "~> 0.16"},
+      {:uuid, "~> 1.1"}
     ]
   end
 

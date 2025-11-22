@@ -18,7 +18,13 @@ defmodule PhoenixUi.MixProject do
   def application do
     [
       mod: {PhoenixUi.Application, []},
-      extra_applications: [:logger,:runtime_tools, :gnat, :telemetry_metrics_prometheus, :tls_certificate_check]
+      extra_applications: [
+        :logger,
+        :runtime_tools,
+        :gnat,
+        :telemetry_metrics_prometheus,
+        :tls_certificate_check
+      ]
     ]
   end
 
@@ -31,9 +37,6 @@ defmodule PhoenixUi.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
-  # Specifies your project dependencies.
-  #
-  # Type `mix help deps` for examples and options.
   defp deps do
     [
       {:phoenix, "~> 1.8.1"},
@@ -45,12 +48,12 @@ defmodule PhoenixUi.MixProject do
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:heroicons,
-        github: "tailwindlabs/heroicons",
-        tag: "v2.2.0",
-        sparse: "optimized",
-        app: false,
-        compile: false,
-        depth: 1},
+       github: "tailwindlabs/heroicons",
+       tag: "v2.2.0",
+       sparse: "optimized",
+       app: false,
+       compile: false,
+       depth: 1},
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
@@ -71,17 +74,12 @@ defmodule PhoenixUi.MixProject do
       {:uuid, "~> 1.1"},
       {:opentelemetry, "~> 1.0"},
       {:opentelemetry_api, "~> 1.0"},
+      {:tesla, "~> 1.7"},
       {:opentelemetry_exporter, "~> 1.0"},
-      {:gnat, "~> 1.6"},
+      {:gnat, "~> 1.6"}
     ]
   end
 
-  # Aliases are shortcuts or tasks specific to the current project.
-  # For example, to install project dependencies and perform other setup tasks, run:
-  #
-  #     $ mix setup
-  #
-  # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
       setup: ["deps.get", "assets.setup", "assets.build"],

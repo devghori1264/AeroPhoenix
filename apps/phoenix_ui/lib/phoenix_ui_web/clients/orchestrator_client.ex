@@ -13,6 +13,11 @@ defmodule PhoenixUiWeb.OrchestratorClient do
   @spec list_machines() :: {:ok, [map()]} | {:error, term()}
   def list_machines, do: request(:get, "/api/v1/machines")
 
+  @spec create_machine(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def create_machine(name, region) do
+    request(:post, "/api/v1/machines", %{"name" => name, "region" => region})
+  end
+
   @spec topology() :: {:ok, map()} | {:error, term()}
   def topology, do: request(:get, "/api/v1/topology")
 
@@ -20,18 +25,28 @@ defmodule PhoenixUiWeb.OrchestratorClient do
   def action(id, body),
     do: request(:post, "/api/v1/machines/#{URI.encode(id)}/action", body)
 
+  @spec get(String.t()) :: {:ok, map()} | {:error, term()}
+  def get(path), do: request(:get, path, nil)
+
+  @spec post(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def post(path, body), do: request(:post, path, body)
+
   defp request(method, path, body \\ nil, attempt \\ 1)
   defp request(_method, _path, _body, attempt) when attempt > 4, do: {:error, :max_retries}
 
-defp request(method, path, body, attempt) do
+  defp request(method, path, body, attempt) do
     url = @base <> path
+
     headers = [
       {"content-type", "application/json"},
       {"authorization", "Bearer #{@token}"}
     ]
 
     require OpenTelemetry.Tracer
-    OpenTelemetry.Tracer.with_span "orch.request", %{attributes: [{"http.method", to_string(method)}, {"http.url", url}]} do
+
+    OpenTelemetry.Tracer.with_span "orch.request", %{
+      attributes: [{"http.method", to_string(method)}, {"http.url", url}]
+    } do
       req =
         case body do
           nil -> Finch.build(method, url, headers)
@@ -41,11 +56,16 @@ defp request(method, path, body, attempt) do
       case Finch.request(req, PhoenixUiWeb.Finch, receive_timeout: @timeout) do
         {:ok, %Response{status: s, body: b}} when s in 200..299 ->
           decode_body(b)
+
         {:ok, %Response{status: s, body: b}} ->
           Logger.warning("[OrchestratorClient] Non-2xx status #{s} for #{path}: #{b}")
           backoff_and_retry(method, path, body, attempt)
+
         {:error, reason} ->
-          Logger.warning("[OrchestratorClient] Request error: #{inspect(reason)} attempt=#{attempt}")
+          Logger.warning(
+            "[OrchestratorClient] Request error: #{inspect(reason)} attempt=#{attempt}"
+          )
+
           backoff_and_retry(method, path, body, attempt)
       end
     end
@@ -59,6 +79,7 @@ defp request(method, path, body, attempt) do
   end
 
   defp decode_body(nil), do: {:ok, %{}}
+
   defp decode_body(binary) when is_binary(binary) do
     case Jason.decode(binary) do
       {:ok, decoded} -> {:ok, decoded}

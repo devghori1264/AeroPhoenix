@@ -1,50 +1,365 @@
-<div class="space-y-4 p-4">
-  <div class="flex gap-4 items-center">
-    <h1 class="text-2xl font-semibold">AeroPhoenix Dashboard</h1>
-    <div class="ml-auto space-x-2">
-      <span class="text-sm text-gray-500">FlyD: <%= if @error, do: "offline", else: "ok" %></span>
+<div class="min-h-screen aurora-bg p-4 sm:p-6 relative overflow-hidden">
+  <div class="aurora-blob aurora-blob-1"></div>
+  <div class="aurora-blob aurora-blob-2"></div>
+  <div class="aurora-blob aurora-blob-3"></div>
+
+  <ul
+    id="toast-container"
+    phx-hook="ToastHook"
+    class="notification-container fixed top-4 right-4 z-50 max-w-[400px] flex flex-col gap-2 list-none"
+  >
+    <%= if Phoenix.Flash.get(@flash, :info) do %>
+      <li class="notification-item notification-success" role="alert">
+        <div class="notification-content">
+          <div class="notification-icon">
+            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24" class="w-5 h-5">
+              <path
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M8.5 11.5 11 14l4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+              >
+              </path>
+            </svg>
+          </div>
+          <div class="notification-text text-sm select-none">
+            {Phoenix.Flash.get(@flash, :info)}
+          </div>
+        </div>
+        <div class="notification-icon notification-close cursor-pointer" data-notification-close>
+          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24" class="w-5 h-5">
+            <path
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18 17.94 6M18 18 6.06 6"
+            >
+            </path>
+          </svg>
+        </div>
+        <div class="notification-progress-bar"></div>
+      </li>
+    <% end %>
+    <%= if Phoenix.Flash.get(@flash, :error) do %>
+      <li class="notification-item notification-error" role="alert">
+        <div class="notification-content">
+          <div class="notification-icon">
+            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24" class="w-5 h-5">
+              <path
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="m15 9-6 6m0-6 6 6m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+              >
+              </path>
+            </svg>
+          </div>
+          <div class="notification-text text-sm select-none">
+            {Phoenix.Flash.get(@flash, :error)}
+          </div>
+        </div>
+        <div class="notification-icon notification-close cursor-pointer" data-notification-close>
+          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24" class="w-5 h-5">
+            <path
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18 17.94 6M18 18 6.06 6"
+            >
+            </path>
+          </svg>
+        </div>
+        <div class="notification-progress-bar"></div>
+      </li>
+    <% end %>
+    <%= if Phoenix.Flash.get(@flash, :warning) do %>
+      <li class="notification-item notification-warning" role="alert">
+        <div class="notification-content">
+          <div class="notification-icon">
+            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24" class="w-5 h-5">
+              <path
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 13V8m0 8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+              >
+              </path>
+            </svg>
+          </div>
+          <div class="notification-text text-sm select-none">
+            {Phoenix.Flash.get(@flash, :warning)}
+          </div>
+        </div>
+        <div class="notification-icon notification-close cursor-pointer" data-notification-close>
+          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24" class="w-5 h-5">
+            <path
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18 17.94 6M18 18 6.06 6"
+            >
+            </path>
+          </svg>
+        </div>
+        <div class="notification-progress-bar"></div>
+      </li>
+    <% end %>
+  </ul>
+
+  <div class="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 fade-in relative z-10">
+    <div>
+      <h1 class="text-display text-[var(--text)] flex items-center gap-3">
+        <span class="gradient-text">AeroPhoenix Dashboard</span>
+      </h1>
+      <p class="text-sm text-[var(--text-secondary)] mt-2">
+        Real-time distributed systems orchestration and chaos engineering
+      </p>
+    </div>
+
+    <div class="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
+      <div class={[
+        "glass flex items-center gap-2 px-4 py-2 rounded-lg border backdrop-blur-xl flex-1 sm:flex-initial transition-all duration-300",
+        if(length(@active_chaos) > 0,
+          do: "border-rose-500/50 bg-rose-500/10",
+          else: "border-[var(--border)]"
+        )
+      ]}>
+        <span class={[
+          "w-2 h-2 rounded-full transition-all duration-300",
+          cond do
+            length(@active_chaos) > 0 ->
+              "bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.6)]"
+
+            @error ->
+              "bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(251,113,133,0.6)]"
+
+            true ->
+              "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.6)]"
+          end
+        ]}>
+        </span>
+        <span class={[
+          "text-sm font-medium",
+          if(length(@active_chaos) > 0,
+            do: "text-rose-600 dark:text-rose-400 font-bold",
+            else: "text-[var(--text-secondary)]"
+          )
+        ]}>
+          Status:
+          <%= cond do %>
+            <% length(@active_chaos) > 0 -> %>
+              <span class="animate-pulse">CHAOS ACTIVE ({length(@active_chaos)})</span>
+            <% @error -> %>
+              Offline
+            <% true -> %>
+              Connected
+          <% end %>
+        </span>
+      </div>
+
+      <button
+        phx-click="refresh"
+        class="btn-demo flex items-center gap-2 group"
+        title="Refresh topology"
+      >
+        <.icon
+          name="hero-arrow-path"
+          class="w-4 h-4 group-hover:rotate-180 transition-transform duration-500"
+        />
+        <span class="hidden sm:inline">Refresh</span>
+      </button>
+
+      <PhoenixUiWeb.Layouts.theme_toggle />
     </div>
   </div>
 
-  <div class="grid grid-cols-3 gap-4">
-    <div class="col-span-2">
-      <PhoenixUiWeb.TopologyComponent.render regions={@regions} machines={@machines} />
-      <div class="mt-3">
-        <form phx-submit="create" class="flex gap-2">
-          <input name="name" placeholder="app name" class="border rounded px-2 py-1"/>
-          <select name="region" class="border rounded px-2 py-1">
-            <%= for r <- @regions do %>
-              <option value={r.name}><%= r.name %></option>
+  <div class="dashboard-grid relative z-10">
+    <div class="dashboard-main">
+      <div class="card card-hover-lift fade-in-delay-1 p-4 sm:p-6">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
+          <h2 class="text-title text-[var(--text)] flex items-center gap-2">
+            <.icon name="hero-globe-americas" class="w-5 h-5 text-violet-500" /> Network Topology
+          </h2>
+          <div class="flex items-center gap-2 text-xs text-[var(--text-muted)] bg-[var(--surface-hover)] px-3 py-1 rounded-full">
+            <span class="font-semibold text-violet-500">{length(@machines)}</span>
+            <span>machines</span>
+            <span>•</span>
+            <span class="font-semibold text-cyan-500">{length(@regions)}</span>
+            <span>regions</span>
+          </div>
+        </div>
+
+        <PhoenixUiWeb.TopologyComponent.render
+          regions={@regions}
+          machines={@machines}
+          active_chaos={@active_chaos}
+        />
+      </div>
+
+      <div class="fade-in-delay-2">
+        <PhoenixUiWeb.CreateMachineForm.render regions={@regions} />
+      </div>
+    </div>
+
+    <div class="dashboard-sidebar">
+      <div class="fade-in-delay-3">
+        <PhoenixUiWeb.MachineCardEnhanced.render machine={@selected} />
+      </div>
+
+      <div class="fade-in-delay-3">
+        <PhoenixUiWeb.ChaosPanelComponent.render
+          active_chaos={@active_chaos}
+          chaos_logs={@chaos_logs}
+        />
+      </div>
+
+      <%= if @chaos_logs != [] do %>
+        <div class="fade-in-delay-4 card p-4 sm:p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-[var(--text)] flex items-center gap-2">
+              <.icon name="hero-command-line" class="w-4 h-4 text-amber-500" />
+              <span>Chaos Activity Logs</span>
+            </h3>
+            <span class="text-xs px-2 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono">
+              {length(@chaos_logs)} events
+            </span>
+          </div>
+
+          <div class="bg-black/80 rounded-lg p-3 font-mono text-xs text-green-400 max-h-48 overflow-y-auto space-y-1">
+            <%= for log <- Enum.take(@chaos_logs, 20) do %>
+              <div class={[
+                "flex items-start gap-2",
+                if(log.level == "warning", do: "text-amber-400", else: "text-green-400")
+              ]}>
+                <span class="text-gray-500 tabular-nums shrink-0">
+                  {format_log_time(log.timestamp)}
+                </span>
+                <span class="break-all">{log.message}</span>
+              </div>
             <% end %>
-          </select>
-          <button class="bg-blue-600 text-white px-3 py-1 rounded">Deploy</button>
+          </div>
+        </div>
+      <% end %>
+
+      <div class="fade-in-delay-3">
+        <PhoenixUiWeb.PlannerPanelComponent.render
+          selected_machine={@selected}
+          recommendations={@prediction || []}
+        />
+      </div>
+    </div>
+  </div>
+
+  <%= if @chaos_modal_open do %>
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md animate-fadeIn p-4"
+      phx-click="close-chaos-modal"
+    >
+      <div
+        phx-click="modal-content-click"
+        class="glass rounded-2xl shadow-2xl border border-[var(--border)] max-w-md w-full p-6 sm:p-8 transform scale-95 animate-[fadeIn_0.3s_ease-out_forwards]"
+      >
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-xl font-semibold text-[var(--text)] flex items-center gap-2">
+            <.icon name="hero-beaker" class="w-6 h-6 text-amber-500" />
+            <span class="gradient-text">Start Chaos Test</span>
+          </h3>
+          <button
+            type="button"
+            phx-click="close-chaos-modal"
+            class="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors duration-200 p-2 hover:bg-[var(--surface-hover)] rounded-lg"
+          >
+            <.icon name="hero-x-mark" class="w-5 h-5" />
+          </button>
+        </div>
+
+        <form phx-submit="submit-chaos" class="space-y-5">
+          <div>
+            <label class="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+              Chaos Type
+            </label>
+            <select
+              name="kind"
+              class="w-full px-4 py-3 glass border border-[var(--border)] rounded-xl text-[var(--text)] focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
+            >
+              <option value="latency">🌐 Network Latency</option>
+              <option value="packet_loss">📦 Packet Loss</option>
+              <option value="cpu_spike">⚡ CPU Spike</option>
+              <option value="memory_leak">💾 Memory Leak</option>
+              <option value="disk_failure">💿 Disk Failure</option>
+              <option value="network_partition">🔌 Network Partition</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+              Target Machine ID (optional)
+            </label>
+            <input
+              type="text"
+              name="target"
+              placeholder="Leave empty for random target"
+              value={@chaos_form["target"]}
+              class="w-full px-4 py-3 glass border border-[var(--border)] rounded-xl text-[var(--text)] placeholder-[var(--text-muted)] focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+              Severity (0.0 - 1.0)
+            </label>
+            <input
+              type="range"
+              name="severity"
+              min="0"
+              max="1"
+              step="0.1"
+              value={@chaos_form["severity"]}
+              class="w-full h-2 bg-[var(--border)] rounded-full appearance-none cursor-pointer slider-thumb"
+            />
+            <div class="flex justify-between text-xs text-[var(--text-muted)] mt-2">
+              <span class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Mild
+              </span>
+              <span class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span> Moderate
+              </span>
+              <span class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-rose-500"></span> Severe
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+              Duration (milliseconds)
+            </label>
+            <input
+              type="number"
+              name="duration_ms"
+              value={@chaos_form["duration_ms"]}
+              min="1000"
+              step="1000"
+              class="w-full px-4 py-3 glass border border-[var(--border)] rounded-xl text-[var(--text)] focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
+            />
+          </div>
+
+          <div class="flex gap-3 pt-4">
+            <button type="button" phx-click="close-chaos-modal" class="flex-1 btn-demo">
+              Cancel
+            </button>
+            <button type="submit" class="flex-1 btn-demo">
+              Start Test
+            </button>
+          </div>
         </form>
       </div>
     </div>
-
-    <div class="col-span-1">
-      <div class="bg-white p-3 rounded shadow">
-        <h2 class="font-medium">Selected Machine</h2>
-        <%= if @selected do %>
-          <p class="text-sm">Name: <%= @selected["name"] %></p>
-          <p class="text-sm">Region: <%= @selected["region"] %></p>
-          <p class="text-sm">Status: <%= @selected["status"] %></p>
-          <div class="mt-2 space-x-2">
-            <button phx-click="refresh-machine" phx-value-id={@selected["id"]} class="px-2 py-1 bg-gray-200 rounded">Refresh</button>
-            <button phx-click="copy-cli" phx-value-cmd={"aeropctl create --name #{@selected["name"]} --region #{@selected["region"]}"} class="px-2 py-1 bg-green-500 text-white rounded">Copy CLI</button>
-          </div>
-        <% else %>
-          <p class="text-sm text-gray-500">Click a machine on the map to inspect</p>
-        <% end %>
-      </div>
-
-      <div class="mt-4 bg-white p-3 rounded shadow">
-        <h3 class="font-medium">Migration Suggestions</h3>
-        <p class="text-sm text-gray-500">(from orchestrator)</p>
-        <div id="suggestions" class="mt-2">
-          <p class="text-sm text-gray-600">No suggestions yet</p>
-        </div>
-      </div>
-    </div>
-  </div>
+  <% end %>
 </div>

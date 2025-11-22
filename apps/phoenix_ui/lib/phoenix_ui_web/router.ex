@@ -22,10 +22,9 @@ defmodule PhoenixUiWeb.Router do
     get "/home", PageController, :home
   end
 
-  scope "/metrics" do
-    forward "/", TelemetryMetricsPrometheus.Plug, init_opts: [name: PhoenixUiWeb.PrometheusExporter]
+  scope "/", PhoenixUiWeb do
+    get "/metrics", MetricsController, :index
   end
-
 
   if Mix.env() in [:dev, :test] do
     scope "/__dev", PhoenixUiWeb do

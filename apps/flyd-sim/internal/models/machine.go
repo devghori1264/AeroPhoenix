@@ -2,8 +2,6 @@ package models
 
 import "time"
 
-// Machine is the core domain object representing a compute instance or node.
-// Shared between the server and storage layers.
 type Machine struct {
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`

@@ -35,12 +35,22 @@ func initTracer() (*sdktrace.TracerProvider, error) {
 }
 
 func main() {
-	grpcAddr := flag.String("grpc-addr", ":50051", "gRPC listen address")
-	httpAddr := flag.String("http-addr", ":8080", "HTTP shim listen address")
-	metricsAddr := flag.String("metrics-addr", ":9090", "Metrics listen address")
+	grpcPort := getEnv("GRPC_PORT", "50051")
+	httpPort := getEnv("HTTP_PORT", "8080")
+	metricsPort := getEnv("METRICS_PORT", "9090")
+	region := getEnv("REGION", "us-east-1")
+
+	grpcAddr := flag.String("grpc-addr", ":"+grpcPort, "gRPC listen address")
+	httpAddr := flag.String("http-addr", ":"+httpPort, "HTTP shim listen address")
+	metricsAddr := flag.String("metrics-addr", ":"+metricsPort, "Metrics listen address")
 	dbPath := flag.String("db", "./data/badger", "Badger DB path")
-	natsURL := flag.String("nats", "nats://nats:4222", "NATS URL")
+	natsURL := flag.String("nats", getEnv("NATS_URL", "nats://nats:4222"), "NATS URL")
+	regionFlag := flag.String("region", region, "Region identifier (e.g., us-east-1, eu-west-1)")
 	flag.Parse()
+
+	log.Printf("Starting flyd-sim in region: %s", *regionFlag)
+	log.Printf("Configuration: gRPC=%s, HTTP=%s, Metrics=%s, NATS=%s",
+		*grpcAddr, *httpAddr, *metricsAddr, *natsURL)
 
 	tp, err := initTracer()
 	if err != nil {
@@ -70,6 +80,8 @@ func main() {
 
 	srv := server.New(store, pub)
 
+	srv.SetRegion(*regionFlag)
+
 	lis, err := net.Listen("tcp", *grpcAddr)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -78,7 +90,7 @@ func main() {
 	srv.RegisterGRPC(grpcServer)
 
 	go func() {
-		log.Printf("gRPC server listening on %s", *grpcAddr)
+		log.Printf("gRPC server listening on %s (region: %s)", *grpcAddr, *regionFlag)
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatalf("grpc serve error: %v", err)
 		}
@@ -87,7 +99,7 @@ func main() {
 	httpHandler := api.NewHTTPHandlerWithPublisher(srv, pub)
 	httpServer := &http.Server{Addr: *httpAddr, Handler: httpHandler}
 	go func() {
-		log.Printf("HTTP shim listening on %s", *httpAddr)
+		log.Printf("HTTP shim listening on %s (region: %s)", *httpAddr, *regionFlag)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http listen: %v", err)
 		}
@@ -95,16 +107,18 @@ func main() {
 
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
-		log.Printf("Prometheus metrics listening on %s/metrics", *metricsAddr)
+		log.Printf("Prometheus metrics listening on %s/metrics (region: %s)", *metricsAddr, *regionFlag)
 		if err := http.ListenAndServe(*metricsAddr, nil); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("metrics listen: %v", err)
 		}
 	}()
 
+	log.Printf("flyd-sim %s fully initialized and ready", *regionFlag)
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
-	log.Printf("shutdown initiated")
+	log.Printf("shutdown initiated for region %s", *regionFlag)
 
 	grpcServer.GracefulStop()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -116,5 +130,12 @@ func main() {
 		pub.Close()
 	}
 	store.Close()
-	log.Println("shutdown complete")
+	log.Printf("shutdown complete for region %s", *regionFlag)
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

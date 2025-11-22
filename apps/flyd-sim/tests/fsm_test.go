@@ -7,9 +7,9 @@ import (
 	"time"
 
 	natsclient "github.com/devghori1264/aerophoenix/flyd-sim/internal/nats"
-	proto "github.com/devghori1264/aerophoenix/flyd-sim/internal/proto"
 	"github.com/devghori1264/aerophoenix/flyd-sim/internal/server"
 	"github.com/devghori1264/aerophoenix/flyd-sim/internal/storage"
+	proto "github.com/devghori1264/aerophoenix/flyd-sim/proto"
 )
 
 func TestCreateStartStopSequence(t *testing.T) {

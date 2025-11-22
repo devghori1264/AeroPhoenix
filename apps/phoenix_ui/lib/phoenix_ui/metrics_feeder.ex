@@ -15,12 +15,26 @@ defmodule PhoenixUi.MetricsFeeder do
       {:ok, machines} when is_list(machines) ->
         Enum.each(machines, fn m ->
           id = m["id"]
-          sample = %{ts: DateTime.utc_now(), cpu: :rand.uniform() * 100, latency: 50 + :rand.uniform(200)}
+
+          sample = %{
+            ts: DateTime.utc_now(),
+            cpu: :rand.uniform() * 100,
+            latency: 50 + :rand.uniform(200)
+          }
+
           PhoenixUi.Machines.add_metric(id, sample)
-          Phoenix.PubSub.broadcast(PhoenixUi.PubSub, "phoenix:metrics", {:metric_sample, id, sample})
+
+          Phoenix.PubSub.broadcast(
+            PhoenixUi.PubSub,
+            "phoenix:metrics",
+            {:metric_sample, id, sample}
+          )
         end)
-      _ -> :ok
+
+      _ ->
+        :ok
     end
+
     schedule()
     {:noreply, state}
   end

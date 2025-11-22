@@ -9,8 +9,11 @@ defmodule PhoenixUiWeb.MigrationLive do
   def handle_params(%{"id" => id}, _uri, socket) do
     case FlydClient.get_machine(id) do
       {:ok, %{"id" => _rid, "status" => status}} ->
-        {:noreply, assign(socket, machine: %{"id" => id, "status" => status}, targets: default_targets())}
-      _ -> {:noreply, socket}
+        {:noreply,
+         assign(socket, machine: %{"id" => id, "status" => status}, targets: default_targets())}
+
+      _ ->
+        {:noreply, socket}
     end
   end
 
@@ -24,6 +27,7 @@ defmodule PhoenixUiWeb.MigrationLive do
       :timer.sleep(200)
       send(self(), {:migrate_tick, i * 10})
     end
+
     send(self(), :migrate_done)
     {:noreply, socket}
   end

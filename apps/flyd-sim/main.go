@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	pb "github.com/devghori1264/aerophoenix/flyd-sim/internal/proto"
+	pb "github.com/devghori1264/aerophoenix/flyd-sim/proto"
 )
 
 type server struct {

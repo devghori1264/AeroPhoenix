@@ -6,6 +6,7 @@ defmodule PhoenixUi.Predictive do
   @interval_ms 5_000
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+
   def latest do
     GenServer.call(__MODULE__, :latest)
   end
@@ -28,7 +29,10 @@ defmodule PhoenixUi.Predictive do
 
   defp generate_mock_recommendations do
     [
-      %{"message" => "Region eu-west CPU spiking — consider pre-warming 2 machines", "score" => 0.91},
+      %{
+        "message" => "Region eu-west CPU spiking — consider pre-warming 2 machines",
+        "score" => 0.91
+      },
       %{"message" => "Latency trend rising between us-east and ap-south", "score" => 0.72}
     ]
   end

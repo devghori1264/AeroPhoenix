@@ -8,10 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/devghori1264/aerophoenix/flyd-sim/internal/migration"
 	"github.com/devghori1264/aerophoenix/flyd-sim/internal/models"
 	natsclient "github.com/devghori1264/aerophoenix/flyd-sim/internal/nats"
-	proto "github.com/devghori1264/aerophoenix/flyd-sim/internal/proto"
 	"github.com/devghori1264/aerophoenix/flyd-sim/internal/storage"
+	proto "github.com/devghori1264/aerophoenix/flyd-sim/proto"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,19 +36,35 @@ func init() {
 
 type Server struct {
 	proto.UnimplementedMachineServiceServer
-	store     storage.Store
-	mu        sync.RWMutex
-	cache     map[string]*models.Machine
-	opMu      sync.Map
-	publisher *natsclient.Publisher
+	store           storage.Store
+	mu              sync.RWMutex
+	cache           map[string]*models.Machine
+	opMu            sync.Map
+	publisher       *natsclient.Publisher
+	migrationEngine *migration.Engine
+	region          string
 }
 
 func New(store storage.Store, publisher *natsclient.Publisher) *Server {
 	return &Server{
-		store:     store,
-		cache:     make(map[string]*models.Machine),
-		publisher: publisher,
+		store:           store,
+		cache:           make(map[string]*models.Machine),
+		publisher:       publisher,
+		migrationEngine: migration.NewEngine(store),
+		region:          "unknown",
 	}
+}
+
+func (s *Server) SetRegion(region string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.region = region
+}
+
+func (s *Server) GetRegion() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.region
 }
 
 func (s *Server) RegisterGRPC(gs *grpc.Server) {
@@ -241,4 +258,112 @@ func (s *Server) publishEvent(ctx context.Context, ev map[string]interface{}) {
 		return
 	}
 	_ = s.publisher.Publish(ctx, "machines.events", data)
+}
+
+func (s *Server) MigrateMachine(ctx context.Context, req *proto.MigrateRequest) (*proto.MigrateResponse, error) {
+	if req.MachineId == "" {
+		return nil, errors.New("machine_id required")
+	}
+	if req.TargetRegion == "" {
+		return nil, errors.New("target_region required")
+	}
+
+	strategy := req.Strategy
+	if strategy == proto.MigrationStrategy_STOP_AND_MOVE && req.Strategy == 0 {
+		strategy = proto.MigrationStrategy_STOP_AND_MOVE
+	}
+
+	mig, err := s.migrationEngine.StartMigration(
+		ctx,
+		req.MachineId,
+		req.TargetRegion,
+		strategy,
+		req.Options,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start migration: %w", err)
+	}
+
+	s.publishEvent(ctx, map[string]interface{}{
+		"event":         "migration.started",
+		"migration_id":  string(mig.ID),
+		"machine_id":    req.MachineId,
+		"target_region": req.TargetRegion,
+		"strategy":      strategy.String(),
+		"time":          time.Now().Unix(),
+	})
+
+	return &proto.MigrateResponse{
+		MigrationId:         string(mig.ID),
+		CurrentPhase:        mig.CurrentPhase,
+		Message:             fmt.Sprintf("Migration started: %s -> %s", mig.SourceRegion, mig.TargetRegion),
+		EstimatedDurationMs: calculateEstimatedDuration(mig.TotalBytes, strategy),
+	}, nil
+}
+
+func (s *Server) GetMigrationStatus(ctx context.Context, req *proto.MigrationStatusRequest) (*proto.MigrationStatusResponse, error) {
+	if req.MigrationId == "" {
+		return nil, errors.New("migration_id required")
+	}
+
+	status, err := s.migrationEngine.GetMigrationStatus(migration.MigrationID(req.MigrationId))
+	if err != nil {
+		return nil, err
+	}
+
+	return status, nil
+}
+
+func (s *Server) StreamMigrationProgress(req *proto.MigrationStatusRequest, stream proto.MachineService_StreamMigrationProgressServer) error {
+	if req.MigrationId == "" {
+		return errors.New("migration_id required")
+	}
+
+	progressChan, err := s.migrationEngine.StreamProgress(migration.MigrationID(req.MigrationId))
+	if err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		case update, ok := <-progressChan:
+			if !ok {
+
+				return nil
+			}
+
+			event := &proto.MigrationProgressEvent{
+				MigrationId:     string(update.MigrationID),
+				Phase:           update.Phase,
+				ProgressPercent: update.ProgressPercent,
+				Message:         update.Message,
+				Timestamp:       update.Timestamp.Unix(),
+			}
+
+			if err := stream.Send(event); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func calculateEstimatedDuration(totalBytes int64, strategy proto.MigrationStrategy) int64 {
+
+	baseTime := map[proto.MigrationStrategy]int64{
+		proto.MigrationStrategy_STOP_AND_MOVE:      5000,
+		proto.MigrationStrategy_LIVE_MIGRATION:     10000,
+		proto.MigrationStrategy_CLONE_AND_REDIRECT: 7000,
+	}
+
+	base := baseTime[strategy]
+	if base == 0 {
+		base = 5000
+	}
+
+	bytesPerMs := int64(100 * 1024 * 1024 / 1000)
+	transferTime := totalBytes / bytesPerMs
+
+	return base + transferTime
 }

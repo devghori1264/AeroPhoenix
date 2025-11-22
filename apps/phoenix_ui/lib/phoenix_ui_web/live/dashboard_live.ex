@@ -15,6 +15,8 @@ defmodule PhoenixUiWeb.DashboardLive do
       Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "phoenix:machines")
       Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "phoenix:predictions")
       :timer.send_interval(@poll_interval_ms, :poll)
+      :timer.send_interval(@poll_interval_ms, :chaos_poll)
+      :timer.send_interval(5_000, :refresh_metrics)
       send(self(), :initial_push)
     end
 
@@ -24,8 +26,12 @@ defmodule PhoenixUiWeb.DashboardLive do
 
     regions =
       case topology do
-        %{"regions" => regs} when is_list(regs) -> regs
-        %{regions: regs} when is_list(regs) -> regs
+        %{"regions" => regs} when is_list(regs) ->
+          regs
+
+        %{regions: regs} when is_list(regs) ->
+          regs
+
         _ ->
           [
             %{name: "us-east", code: "us-east", count: 0},
@@ -41,7 +47,16 @@ defmodule PhoenixUiWeb.DashboardLive do
       logs: [],
       prediction: prediction,
       selected: nil,
-      error: nil
+      error: nil,
+      active_chaos: [],
+      chaos_logs: [],
+      chaos_modal_open: false,
+      chaos_form: %{
+        "kind" => "latency",
+        "target" => "",
+        "severity" => "0.5",
+        "duration_ms" => "30000"
+      }
     }
 
     {:ok, assign(socket, assigns)}
@@ -49,7 +64,11 @@ defmodule PhoenixUiWeb.DashboardLive do
 
   @impl true
   def handle_info(:initial_push, socket) do
-    push_event(socket, "topology:update", %{regions: socket.assigns.regions, machines: socket.assigns.machines})
+    push_event(socket, "topology:update", %{
+      regions: socket.assigns.regions,
+      machines: socket.assigns.machines
+    })
+
     {:noreply, socket}
   end
 
@@ -93,24 +112,111 @@ defmodule PhoenixUiWeb.DashboardLive do
     {:noreply, socket}
   end
 
+  def handle_info(:chaos_poll, socket) do
+    case OrchestratorClient.get("/api/v1/chaos/active") do
+      {:ok, %{"incidents" => incidents}} ->
+        socket =
+          if length(incidents) != length(socket.assigns.active_chaos) do
+            new_incidents = incidents -- socket.assigns.active_chaos
+
+            new_logs =
+              Enum.map(new_incidents, fn incident ->
+                kind = incident["kind"] || incident[:kind] || "unknown"
+                severity = incident["severity"] || incident[:severity] || 0.5
+
+                %{
+                  timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+                  message: "Started #{kind} chaos (severity: #{round(severity * 100)}%)",
+                  level: "warning",
+                  kind: kind,
+                  severity: severity
+                }
+              end)
+
+            chaos_logs = (new_logs ++ socket.assigns.chaos_logs) |> Enum.take(50)
+            assign(socket, chaos_logs: chaos_logs)
+          else
+            socket
+          end
+
+        push_event(socket, "topology:update", %{
+          regions: socket.assigns.regions,
+          machines: socket.assigns.machines,
+          active_chaos: incidents
+        })
+
+        {:noreply, assign(socket, active_chaos: incidents)}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
   @impl true
+  def handle_info(:refresh_metrics, socket) do
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info(:refresh_after_action, socket) do
+    machines = Machines.list_all()
+    topology = safe_topology()
+
+    socket =
+      socket
+      |> assign(machines: machines, topology: topology)
+      |> push_event("topology:update", %{
+        regions: socket.assigns.regions,
+        machines: machines,
+        active_chaos: socket.assigns.active_chaos || []
+      })
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:recommendations_received, recs}, socket) do
+    {:noreply, assign(socket, prediction: recs)}
+  end
+
+  @impl true
+  def handle_event("update-cost", _params, socket) do
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event(
+        "create",
+        %{"name" => name, "region" => region, "cpu_size" => cpu_size, "memory_mb" => memory_mb} =
+          _params,
+        socket
+      )
+      when is_binary(name) and is_binary(region) do
+    memory_int = String.to_integer(memory_mb)
+    do_create_machine(name, region, cpu_size, memory_int, socket)
+  end
+
   def handle_event("create", %{"name" => name, "region" => region} = _params, socket)
       when is_binary(name) and is_binary(region) do
-    do_create_machine(name, region, socket)
+    do_create_machine(name, region, "dedicated-cpu-1x", 512, socket)
   end
 
   def handle_event("create", %{"name" => name} = _params, socket) when is_binary(name) do
     region = default_region(socket.assigns.regions)
-    do_create_machine(name, region, socket)
+    do_create_machine(name, region, "dedicated-cpu-1x", 512, socket)
   end
 
   def handle_event("create", %{"value" => encoded} = _params, socket) when is_binary(encoded) do
     params = URI.decode_query(encoded)
     name = Map.get(params, "name")
     region = Map.get(params, "region") || default_region(socket.assigns.regions)
+    cpu_size = Map.get(params, "cpu_size", "dedicated-cpu-1x")
+    memory_mb = Map.get(params, "memory_mb", "512") |> String.to_integer()
 
     cond do
-      is_binary(name) and name != "" -> do_create_machine(name, region, socket)
+      is_binary(name) and name != "" ->
+        do_create_machine(name, region, cpu_size, memory_mb, socket)
+
       true ->
         Logger.warning("dashboard:create - invalid form payload: #{inspect(params)}")
         {:noreply, socket |> put_flash(:error, "Invalid create form")}
@@ -127,34 +233,117 @@ defmodule PhoenixUiWeb.DashboardLive do
 
   @impl true
   def handle_event("refresh-machine", %{"id" => id}, socket) do
+    machine =
+      Enum.find(socket.assigns.machines, fn m ->
+        (m[:id] || m["id"]) == id
+      end)
+
+    machine_name =
+      case machine do
+        %{name: name} -> name
+        %{"name" => name} -> name
+        _ -> "Machine"
+      end
+
     Task.start(fn ->
-      case FlydClient.get_machine(id) do
-        {:ok, _} -> :ok
-        {:error, reason} -> Logger.warning("refresh-machine failed: #{inspect(reason)}")
+      remote_id =
+        case machine do
+          %{metadata: %{"remote_id" => rid}} -> rid
+          %{"metadata" => %{"remote_id" => rid}} -> rid
+          _ -> id
+        end
+
+      case FlydClient.get_machine(remote_id) do
+        {:ok, updated_machine} ->
+          send(PhoenixUi.Machines, {:machine_update, Map.put(updated_machine, "id", id)})
+          Logger.info("refresh-machine succeeded for #{id}")
+
+        {:error, reason} ->
+          Logger.warning("refresh-machine failed for #{id}: #{inspect(reason)}")
       end
     end)
+
+    {:noreply, put_flash(socket, :info, "#{machine_name} is refreshed")}
+  end
+
+  def handle_event("refresh-machine", %{"value" => _}, socket) do
     {:noreply, socket}
   end
 
   def handle_event("copy-cli", %{"cmd" => cmd}, socket) do
-    push_event(socket, "copy-cli", %{cmd: cmd})
-    {:noreply, socket}
+    machine_name =
+      cmd
+      |> String.split(" ")
+      |> List.last()
+      |> case do
+        nil -> "Machine"
+        name -> name
+      end
+
+    socket = push_event(socket, "copy-cli", %{cmd: cmd})
+    {:noreply, put_flash(socket, :info, "#{machine_name} CLI command copied")}
   end
 
   @impl true
   def handle_event("action", %{"id" => id, "action" => action} = payload, socket) do
+    machine =
+      Enum.find(socket.assigns.machines, fn m ->
+        (m[:id] || m["id"]) == id
+      end)
+
+    machine_name =
+      case machine do
+        %{name: name} -> name
+        %{"name" => name} -> name
+        _ -> "Machine"
+      end
+
+    live_view_pid = self()
+
     Task.start(fn ->
       :telemetry.execute([:aerophoenix, :ui, :action], %{}, %{action: action, id: id})
+
       case safe_call(fn ->
-            OrchestratorClient.action(id, Map.put(Map.drop(payload, ["id", "action"]), "action", action))
-          end) do
-        {:ok, _} -> Logger.info("Action #{action} for #{id} succeeded")
-        {:error, r} -> Logger.warning("Action #{action} for #{id} failed: #{inspect(r)}")
+             OrchestratorClient.action(
+               id,
+               Map.put(Map.drop(payload, ["id", "action"]), "action", action)
+             )
+           end) do
+        {:ok, _} ->
+          Logger.info("Action #{action} for #{id} succeeded")
+          Process.sleep(100)
+
+          case OrchestratorClient.topology() do
+            {:ok, topo} ->
+              send(PhoenixUi.Machines, {:populate_topology, topo})
+              send(live_view_pid, :refresh_after_action)
+
+            {:error, reason} ->
+              Logger.warning("Failed to refresh after action: #{inspect(reason)}")
+          end
+
+        {:error, r} ->
+          Logger.warning("Action #{action} for #{id} failed: #{inspect(r)}")
       end
     end)
-    nats_payload = %{user: "dev", action: action, id: id, ts: DateTime.utc_now() |> DateTime.to_iso8601()}
+
+    nats_payload = %{
+      user: "dev",
+      action: action,
+      id: id,
+      ts: DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
     PhoenixUiWeb.NatsClient.publish("ui.actions", nats_payload)
-    {:noreply, socket}
+
+    message =
+      case action do
+        "stop" -> "#{machine_name} is stopped"
+        "restart" -> "#{machine_name} restarted"
+        _ -> "#{machine_name} #{action} completed"
+      end
+
+    {:noreply, put_flash(socket, :info, message)}
   end
 
   @impl true
@@ -163,17 +352,238 @@ defmodule PhoenixUiWeb.DashboardLive do
       {:ok, topo} ->
         send(PhoenixUi.Machines, {:populate_topology, topo})
         {:noreply, assign(socket, machines: Machines.list_all(), topology: topo)}
+
       {:error, _} ->
         {:noreply, assign(socket, error: "Orchestrator unreachable")}
     end
   end
 
-  defp do_create_machine(name, region, socket) do
+  @impl true
+  def handle_event("get-recommendations", %{"machine-id" => machine_id}, socket) do
     Task.start(fn ->
-      case safe_call(fn -> FlydClient.create_machine(name, region) end) do
-        {:ok, %{"id" => id}} -> Logger.info("Created machine #{id} in #{region}")
-        {:ok, other} -> Logger.info("Create returned: #{inspect(other)}")
-        {:error, reason} -> Logger.warning("Create machine failed: #{inspect(reason)}")
+      case OrchestratorClient.get("/api/v1/planner/recommend?machine_id=#{machine_id}") do
+        {:ok, %{"recommendations" => recs}} ->
+          send(self(), {:recommendations_received, recs})
+
+        _ ->
+          Logger.warning("Failed to get recommendations for machine #{machine_id}")
+      end
+    end)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("simulate-migration", %{"rec-id" => _rec_id}, socket) do
+    {:noreply, put_flash(socket, :info, "Migration simulation started")}
+  end
+
+  @impl true
+  def handle_event("apply-migration", %{"rec-id" => _rec_id}, socket) do
+    {:noreply, put_flash(socket, :info, "Migration applied")}
+  end
+
+  @impl true
+  def handle_event("clear-flash", _, socket) do
+    {:noreply, clear_flash(socket)}
+  end
+
+  @impl true
+  def handle_event("delete-machine-confirm", %{"id" => id}, socket) do
+    {:noreply, push_event(socket, "confirm-delete", %{id: id})}
+  end
+
+  @impl true
+  def handle_event("delete-machine", %{"id" => id}, socket) do
+    machine =
+      Enum.find(socket.assigns.machines, fn m ->
+        (m[:id] || m["id"]) == id
+      end)
+
+    machine_name =
+      case machine do
+        %{name: name} -> name
+        %{"name" => name} -> name
+        _ -> "Machine"
+      end
+
+    case Machines.delete(id) do
+      {:ok, _} ->
+        updated_machines =
+          Enum.reject(socket.assigns.machines, fn m ->
+            (m[:id] || m["id"]) == id
+          end)
+
+        socket = assign(socket, machines: updated_machines)
+
+        socket =
+          push_event(socket, "topology:update", %{
+            machines: updated_machines,
+            regions: socket.assigns.regions || [],
+            active_chaos: socket.assigns.active_chaos || []
+          })
+
+        {:noreply, put_flash(socket, :info, "#{machine_name} deleted")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete #{machine_name}")}
+    end
+  end
+
+  @impl true
+  def handle_event("open-chaos-modal", _params, socket) do
+    target =
+      case socket.assigns.selected do
+        %{"id" => id} when is_binary(id) -> id
+        %{id: id} when is_binary(id) -> id
+        _ -> ""
+      end
+
+    chaos_form = %{
+      "kind" => "latency",
+      "target" => target,
+      "severity" => "0.5",
+      "duration_ms" => "30000"
+    }
+
+    {:noreply, assign(socket, chaos_modal_open: true, chaos_form: chaos_form)}
+  end
+
+  def handle_event("close-chaos-modal", _params, socket) do
+    {:noreply, assign(socket, chaos_modal_open: false)}
+  end
+
+  def handle_event("modal-content-click", _params, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("submit-chaos", params, socket) do
+    scenario = %{
+      kind: params["kind"],
+      target: if(params["target"] != "", do: params["target"], else: nil),
+      severity: String.to_float(params["severity"] || "0.5"),
+      duration_ms: String.to_integer(params["duration_ms"] || "30000")
+    }
+
+    case OrchestratorClient.post("/api/v1/chaos/start", scenario) do
+      {:ok, %{"status" => "started", "incident" => incident}} ->
+        Logger.info("Started chaos incident #{incident["id"]}")
+
+        chaos_log = %{
+          timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+          message:
+            "Started #{scenario.kind} chaos (severity: #{round(scenario.severity * 100)}%)",
+          level: "warning"
+        }
+
+        chaos_logs = [chaos_log | socket.assigns.chaos_logs] |> Enum.take(50)
+        active_chaos = [incident | socket.assigns.active_chaos]
+
+        push_event(socket, "topology:update", %{
+          regions: socket.assigns.regions,
+          machines: socket.assigns.machines,
+          active_chaos: active_chaos
+        })
+
+        {:noreply,
+         socket
+         |> assign(chaos_modal_open: false, chaos_logs: chaos_logs, active_chaos: active_chaos)
+         |> put_flash(:info, "Chaos test started successfully")}
+
+      {:ok, %{"incident" => incident}} ->
+        Logger.info("Started chaos incident #{incident["id"]}")
+
+        chaos_log = %{
+          timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+          message:
+            "Started #{scenario.kind} chaos (severity: #{round(scenario.severity * 100)}%)",
+          level: "warning"
+        }
+
+        chaos_logs = [chaos_log | socket.assigns.chaos_logs] |> Enum.take(50)
+        active_chaos = [incident | socket.assigns.active_chaos]
+
+        push_event(socket, "topology:update", %{
+          regions: socket.assigns.regions,
+          machines: socket.assigns.machines,
+          active_chaos: active_chaos
+        })
+
+        {:noreply,
+         socket
+         |> assign(chaos_modal_open: false, chaos_logs: chaos_logs, active_chaos: active_chaos)
+         |> put_flash(:info, "Chaos test started successfully")}
+
+      {:ok, response} when is_map(response) ->
+        incident = Map.get(response, "incident", response)
+        id = incident["id"] || Map.get(response, "id", "unknown")
+        Logger.info("Started chaos incident #{id}")
+
+        chaos_log = %{
+          timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+          message:
+            "Started #{scenario.kind} chaos (severity: #{round(scenario.severity * 100)}%)",
+          level: "warning"
+        }
+
+        chaos_logs = [chaos_log | socket.assigns.chaos_logs] |> Enum.take(50)
+        active_chaos = [incident | socket.assigns.active_chaos]
+
+        push_event(socket, "topology:update", %{
+          regions: socket.assigns.regions,
+          machines: socket.assigns.machines,
+          active_chaos: active_chaos
+        })
+
+        {:noreply,
+         socket
+         |> assign(chaos_modal_open: false, chaos_logs: chaos_logs, active_chaos: active_chaos)
+         |> put_flash(:info, "Chaos test started successfully")}
+
+      {:error, reason} ->
+        Logger.error("Failed to start chaos: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to start chaos test")}
+    end
+  end
+
+  @impl true
+  def handle_event("stop-chaos", %{"id" => id}, socket) do
+    Task.start(fn ->
+      case OrchestratorClient.post("/api/v1/chaos/stop/#{id}", %{}) do
+        {:ok, _} -> Logger.info("Stopped chaos incident #{id}")
+        _ -> Logger.warning("Failed to stop chaos incident #{id}")
+      end
+    end)
+
+    chaos_log = %{
+      timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+      message: "Stopped chaos incident #{String.slice(id, 0, 8)}",
+      level: "info"
+    }
+
+    chaos_logs = [chaos_log | socket.assigns.chaos_logs] |> Enum.take(50)
+
+    {:noreply, assign(socket, chaos_logs: chaos_logs)}
+  end
+
+  defp do_create_machine(name, region, cpu_size, memory_mb, socket) do
+    Task.start(fn ->
+      payload = %{
+        "name" => name,
+        "region" => region,
+        "cpu_size" => cpu_size,
+        "memory_mb" => memory_mb
+      }
+
+      case safe_call(fn -> OrchestratorClient.post("/api/v1/machines", payload) end) do
+        {:ok, %{"id" => id}} ->
+          Logger.info("Created machine #{id} in #{region} with #{cpu_size}, #{memory_mb}MB RAM")
+
+        {:ok, other} ->
+          Logger.info("Create returned: #{inspect(other)}")
+
+        {:error, reason} ->
+          Logger.warning("Create machine failed: #{inspect(reason)}")
       end
     end)
 
@@ -183,8 +593,9 @@ defmodule PhoenixUiWeb.DashboardLive do
       "region" => region,
       "status" => "pending",
       "cpu" => 0,
-      "memory_mb" => 0,
-      "latency" => 0
+      "memory_mb" => memory_mb,
+      "latency" => 0,
+      "metadata" => %{"cpu_size" => cpu_size}
     }
 
     machines = [normalize_machine_payload(pseudo) | socket.assigns.machines]
@@ -202,12 +613,14 @@ defmodule PhoenixUiWeb.DashboardLive do
         %{id: i} -> i == id
         _ -> false
       end)
+
     {:noreply, assign(socket, selected: selected)}
   end
 
   defp upsert_machine(list, new_machine) when is_list(list) do
     normalized = normalize_machine_payload(new_machine)
     existing_ids = Enum.map(list, fn m -> m[:id] || m["id"] end)
+
     if normalized.id in existing_ids do
       Enum.map(list, fn m ->
         if (m[:id] || m["id"]) == normalized.id, do: normalized, else: m
@@ -230,6 +643,7 @@ defmodule PhoenixUiWeb.DashboardLive do
   defp default_region(regions) when is_list(regions) and regions != [] do
     hd(regions) |> Map.get(:name) || hd(regions) |> Map.get("name")
   end
+
   defp default_region(_), do: "us-east"
 
   defp safe_call(fun) do
@@ -290,7 +704,8 @@ defmodule PhoenixUiWeb.DashboardLive do
   end
 
   defp normalize_machine_payload(m) when is_map(m) do
-    if Code.ensure_loaded?(PhoenixUi.Machines) and function_exported?(PhoenixUi.Machines, :normalize_machine, 1) do
+    if Code.ensure_loaded?(PhoenixUi.Machines) and
+         function_exported?(PhoenixUi.Machines, :normalize_machine, 1) do
       try do
         PhoenixUi.Machines.normalize_machine(m)
       rescue
@@ -307,13 +722,21 @@ defmodule PhoenixUiWeb.DashboardLive do
     region = get_in_map(m, ["region", :region]) || "unknown"
     status_raw = get_in_map(m, ["status", :status]) || "unknown"
     status = String.to_atom(to_string(status_raw))
-    cpu = parse_num(get_in_map(m, ["cpu", :cpu]) || get_in_map(m, ["cpu_percent", :cpu_percent]) || 0)
+
+    cpu =
+      parse_num(get_in_map(m, ["cpu", :cpu]) || get_in_map(m, ["cpu_percent", :cpu_percent]) || 0)
+
     memory_mb = parse_num(get_in_map(m, ["memory_mb", :memory_mb]) || 0)
-    latency = parse_num(get_in_map(m, ["latency_ms", :latency_ms]) || get_in_map(m, ["latency", :latency]) || 0)
+
+    latency =
+      parse_num(
+        get_in_map(m, ["latency_ms", :latency_ms]) || get_in_map(m, ["latency", :latency]) || 0
+      )
+
     updated_at =
       get_in_map(m, ["updated_at", :updated_at]) ||
-      get_in_map(m, ["created_at", :created_at]) ||
-      DateTime.to_iso8601(DateTime.utc_now())
+        get_in_map(m, ["created_at", :created_at]) ||
+        DateTime.to_iso8601(DateTime.utc_now())
 
     %{
       id: id,
@@ -338,16 +761,31 @@ defmodule PhoenixUiWeb.DashboardLive do
       end
     end)
   end
+
   defp get_in_map(value, []), do: value
   defp get_in_map(_, _), do: nil
 
   defp parse_num(n) when is_integer(n), do: n
   defp parse_num(n) when is_float(n), do: n
+
   defp parse_num(s) when is_binary(s) do
     case Float.parse(s) do
       {f, _} -> f
       :error -> 0
     end
   end
+
   defp parse_num(_), do: 0
+
+  defp format_log_time(timestamp) when is_binary(timestamp) do
+    case DateTime.from_iso8601(timestamp) do
+      {:ok, dt, _} ->
+        "#{String.pad_leading(Integer.to_string(dt.hour), 2, "0")}:#{String.pad_leading(Integer.to_string(dt.minute), 2, "0")}:#{String.pad_leading(Integer.to_string(dt.second), 2, "0")}"
+
+      _ ->
+        "00:00:00"
+    end
+  end
+
+  defp format_log_time(_), do: "00:00:00"
 end

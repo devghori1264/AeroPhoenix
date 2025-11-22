@@ -17,6 +17,7 @@ defmodule PhoenixUiWeb.NatsClient do
           Process.monitor(conn)
           Logger.info("NATS client connected successfully")
           {:ok, conn}
+
         {:error, reason} ->
           Logger.warning("NATS connect failed: #{inspect(reason)}, will retry")
           schedule_reconnect()
@@ -33,6 +34,7 @@ defmodule PhoenixUiWeb.NatsClient do
     case conn do
       nil ->
         {:reply, {:error, :nats_unavailable}, conn}
+
       pid ->
         try do
           :ok = :gnat.pub(pid, subject, Jason.encode!(payload))
@@ -53,10 +55,11 @@ defmodule PhoenixUiWeb.NatsClient do
   def handle_info(:reconnect, _state) do
     try do
       case :gnat.start_link(%{host: @nats_url}) do
-        {:ok, conn} -> 
+        {:ok, conn} ->
           Logger.info("NATS client reconnected")
           {:noreply, conn}
-        {:error, _} -> 
+
+        {:error, _} ->
           schedule_reconnect()
           {:noreply, nil}
       end
@@ -65,5 +68,6 @@ defmodule PhoenixUiWeb.NatsClient do
         {:noreply, nil}
     end
   end
+
   defp schedule_reconnect, do: Process.send_after(self(), :reconnect, 5_000)
 end

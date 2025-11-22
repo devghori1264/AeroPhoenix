@@ -14,22 +14,20 @@ var (
 	ErrNotFound = errors.New("not found")
 )
 
-// Store interface (kept minimal, allows swapping implementations).
 type Store interface {
 	SaveMachine(ctx context.Context, m *models.Machine) error
 	GetMachine(ctx context.Context, id string) (*models.Machine, error)
 	Close() error
 }
 
-// BadgerStore implements Store with Badger DB.
 type BadgerStore struct {
 	db *badger.DB
 }
 
 func NewBadgerStore(path string) (Store, error) {
 	opts := badger.DefaultOptions(filepath.Clean(path))
-	opts.Logger = nil                         // disable badger logs for test clarity
-	opts = opts.WithValueLogFileSize(1 << 20) // smaller value log for local dev
+	opts.Logger = nil
+	opts = opts.WithValueLogFileSize(1 << 20)
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, err

@@ -13,3 +13,17 @@ apps/phoenix_ui/e2e/node_modules/
 apps/phoenix_ui/e2e/test-results.env
 
 .env
+
+apps/flyd-sim/server
+
+infra/region-router/router
+cli/aeropctl/aeropctl
+apps/flyd-sim/server
+
+/apps/phoenix_ui/priv/static/assets
+/apps/phoenix_ui/priv/static/cache_manifest.json
+/apps/phoenix_ui/priv/static/js
+/apps/phoenix_ui/priv/static/css
+apps/phoenix_ui/priv/static/*.gz
+apps/phoenix_ui/priv/static/cache_manifest.json
+/apps/phoenix_ui/priv/static/*

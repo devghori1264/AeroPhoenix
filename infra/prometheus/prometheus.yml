@@ -1,14 +1,114 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    cluster: 'aerophoenix-dev'
+    environment: 'development'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - '/etc/prometheus/rules/*.yml'
 
 scrape_configs:
   - job_name: 'phoenix_ui'
     static_configs:
       - targets: ['host.docker.internal:4000']
-  - job_name: 'flyd_sim'
+        labels:
+          tier: 'frontend'
+          component: 'ui'
+
+  - job_name: 'flyd_sim_us_east_1'
     static_configs:
-      - targets: ['host.docker.internal:8080']
+      - targets: ['flyd-sim-us-east-1:9090']
+        labels:
+          region: 'us-east-1'
+          tier: 'compute'
+          component: 'flyd-sim'
+          is_primary: 'true'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  - job_name: 'flyd_sim_eu_west_1'
+    static_configs:
+      - targets: ['flyd-sim-eu-west-1:9091']
+        labels:
+          region: 'eu-west-1'
+          tier: 'compute'
+          component: 'flyd-sim'
+          is_primary: 'false'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  - job_name: 'flyd_sim_ap_south_1'
+    static_configs:
+      - targets: ['flyd-sim-ap-south-1:9092']
+        labels:
+          region: 'ap-south-1'
+          tier: 'compute'
+          component: 'flyd-sim'
+          is_primary: 'false'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  - job_name: 'flyd_sim_us_west_2'
+    static_configs:
+      - targets: ['flyd-sim-us-west-2:9094']
+        labels:
+          region: 'us-west-2'
+          tier: 'compute'
+          component: 'flyd-sim'
+          is_primary: 'false'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  - job_name: 'region_router'
+    static_configs:
+      - targets: ['region-router:8000']
+        labels:
+          tier: 'gateway'
+          component: 'router'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'consul'
+    static_configs:
+      - targets: ['region-registry:8500']
+        labels:
+          tier: 'infrastructure'
+          component: 'consul'
+    metrics_path: '/v1/agent/metrics'
+    params:
+      format: ['prometheus']
+
   - job_name: 'net_sim'
     static_configs:
-      - targets: ['host.docker.internal:7070']
+      - targets: ['net-sim-chaos:7070']
+        labels:
+          tier: 'chaos'
+          component: 'net-sim'
+
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+        labels:
+          tier: 'observability'
+          component: 'otel'
+
+  - job_name: 'nats'
+    static_configs:
+      - targets: ['nats:8222']
+        labels:
+          tier: 'messaging'
+          component: 'nats'
+    metrics_path: '/metrics'
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          tier: 'observability'
+          component: 'prometheus'
