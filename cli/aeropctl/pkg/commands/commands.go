@@ -12,6 +12,7 @@ import (
 	"github.com/devghori1264/aerophoenix/cli/aeropctl/pkg/formatter"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
+	"github.com/devghori1264/aerophoenix/cli/aeropctl/pkg/logs"
 )
 
 type GlobalFlags struct {
@@ -420,8 +421,22 @@ type LogsOptions struct {
 }
 
 func RunLogs(machineID string, opts LogsOptions) error {
-
 	f := formatter.NewFormatter(formatter.FormatTable, !opts.NoColor)
+
+	opts.Level = strings.ToUpper(opts.Level)
+
+	streamOpts := logs.StreamOptions{
+		Follow:      opts.Follow,
+		Tail:        opts.Tail,
+		Filter:      opts.Filter,
+		Level:       opts.Level,
+		JSONOutput:  opts.JSONOutput,
+		NoTimestamp: opts.NoTimestamp,
+		NatsURL:     opts.NatsURL,
+		NoColor:     opts.NoColor,
+		Since:       opts.Since,
+	}
+
 	f.FormatInfo(fmt.Sprintf("Log streaming configured for machine: %s", machineID))
 	f.FormatInfo(fmt.Sprintf("  Follow: %v | Tail: %d | Level: %s", opts.Follow, opts.Tail, opts.Level))
 	f.FormatInfo(fmt.Sprintf("  NATS URL: %s", opts.NatsURL))
@@ -430,5 +445,10 @@ func RunLogs(machineID string, opts LogsOptions) error {
 		f.FormatSuccess("Live streaming enabled - logs will appear in real-time")
 	}
 
-	return nil
+	streamer, err := logs.NewStreamer(machineID, streamOpts)
+	if err != nil {
+		return err
+	}
+
+	return streamer.Stream(machineID)
 }

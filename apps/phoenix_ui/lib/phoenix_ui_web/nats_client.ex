@@ -11,25 +11,36 @@ defmodule PhoenixUiWeb.NatsClient do
   end
 
   def init(_) do
+    Process.flag(:trap_exit, true)
+    send(self(), :connect)
+    {:ok, nil}
+  end
+
+  def handle_info(:connect, _state) do
     try do
       uri = URI.parse(@nats_url)
       opts = %{host: uri.host, port: uri.port || 4222}
 
       case Gnat.start_link(opts) do
         {:ok, conn} ->
-          Process.monitor(conn)
           Logger.info("NATS client connected successfully")
-          {:ok, conn}
+          {:noreply, conn}
 
         {:error, reason} ->
           Logger.warning("NATS connect failed: #{inspect(reason)}, will retry")
           schedule_reconnect()
-          {:ok, nil}
+          {:noreply, nil}
       end
     rescue
-      UndefinedFunctionError ->
-        Logger.warning("NATS client library (gnat) not available, running without NATS support")
-        {:ok, nil}
+      e ->
+        Logger.warning("NATS client error: #{inspect(e)}, running without NATS support")
+        schedule_reconnect()
+        {:noreply, nil}
+    catch
+      :exit, reason ->
+        Logger.warning("NATS connect exited: #{inspect(reason)}, will retry")
+        schedule_reconnect()
+        {:noreply, nil}
     end
   end
 
@@ -55,24 +66,8 @@ defmodule PhoenixUiWeb.NatsClient do
     {:noreply, nil}
   end
 
-  def handle_info(:reconnect, _state) do
-    try do
-      uri = URI.parse(@nats_url)
-      opts = %{host: uri.host, port: uri.port || 4222}
-
-      case Gnat.start_link(opts) do
-        {:ok, conn} ->
-          Logger.info("NATS client reconnected")
-          {:noreply, conn}
-
-        {:error, _} ->
-          schedule_reconnect()
-          {:noreply, nil}
-      end
-    rescue
-      UndefinedFunctionError ->
-        {:noreply, nil}
-    end
+  def handle_info(:reconnect, state) do
+    handle_info(:connect, state)
   end
 
   defp schedule_reconnect, do: Process.send_after(self(), :reconnect, 5_000)

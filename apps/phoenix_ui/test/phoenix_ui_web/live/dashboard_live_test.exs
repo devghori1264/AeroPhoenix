@@ -5,9 +5,10 @@ defmodule PhoenixUiWeb.DashboardLiveTest do
 
   describe "Dashboard UI" do
     test "renders dashboard and handles machine creation", %{conn: conn} do
+      conn = init_test_session(conn, %{user_id: "test_user"})
       {:ok, view, html} = live(conn, ~p"/dashboard")
-      assert html =~ "AeroPhoenix"
-      assert html =~ "Dashboard"
+      assert html =~ "AEROPHOENIX"
+      assert html =~ "Overview"
 
       assert has_element?(view, "form[phx-submit='create']")
       assert has_element?(view, "input[name='name']")
@@ -15,10 +16,11 @@ defmodule PhoenixUiWeb.DashboardLiveTest do
     end
 
     test "reacts to machine pubsub updates", %{conn: conn} do
+      conn = init_test_session(conn, %{user_id: "test_user"})
       {:ok, view, _html} = live(conn, ~p"/dashboard")
 
       initial_html = render(view)
-      assert initial_html =~ "AeroPhoenix"
+      assert initial_html =~ "AEROPHOENIX"
 
       machine = %{
         "id" => "m-123",
@@ -34,14 +36,15 @@ defmodule PhoenixUiWeb.DashboardLiveTest do
       :timer.sleep(50)
 
       html = render(view)
-      assert html =~ "AeroPhoenix"
-      assert html =~ "Dashboard"
+      assert html =~ "AEROPHOENIX"
+      assert html =~ "Overview"
     end
 
     test "handles copy-cli event gracefully", %{conn: conn} do
+      conn = init_test_session(conn, %{user_id: "test_user"})
       {:ok, view, _html} = live(conn, ~p"/dashboard")
       render_click(view, "copy-cli", %{"cmd" => "flyctl deploy"})
-      assert render(view) =~ "AeroPhoenix"
+      assert render(view) =~ "AEROPHOENIX"
     end
   end
 end

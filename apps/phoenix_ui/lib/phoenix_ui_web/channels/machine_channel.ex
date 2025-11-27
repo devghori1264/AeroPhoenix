@@ -117,9 +117,11 @@ defmodule PhoenixUiWeb.MachineChannel do
 
   @impl true
   def handle_info({:log_event, log_entry}, socket) do
+    new_stats = Map.update!(socket.assigns.stats, :total_logs, &(&1 + 1))
+    
     socket =
       socket
-      |> update_in([:assigns, :stats, :total_logs], &(&1 + 1))
+      |> assign(:stats, new_stats)
       |> process_log_entry(log_entry)
 
     {:noreply, socket}
@@ -167,35 +169,42 @@ defmodule PhoenixUiWeb.MachineChannel do
   defp parse_filter_value(_, _, default), do: default
 
   defp process_log_entry(socket, log_entry) do
-    cond do
-      not passes_filter?(log_entry, socket.assigns.filters) ->
-        socket
-
-      not TokenBucket.consume(socket.assigns.rate_limiter) ->
-        socket
-        |> update_in([:assigns, :stats, :rate_limited], &(&1 + 1))
-        |> maybe_notify_rate_limited()
-
-      true ->
-        buffer = CircularBuffer.insert(socket.assigns.buffer, log_entry)
-
-        socket =
+    if not passes_filter?(log_entry, socket.assigns.filters) do
+      socket
+    else
+      case TokenBucket.consume(socket.assigns.rate_limiter) do
+        {:error, :rate_limited} ->
+          new_stats = Map.update!(socket.assigns.stats, :rate_limited, &(&1 + 1))
+          
           socket
-          |> assign(:buffer, buffer)
+          |> assign(:stats, new_stats)
+          |> maybe_notify_rate_limited()
 
-        if not socket.assigns.paused and CircularBuffer.size(buffer) < @buffer_size * 0.9 do
-          push(socket, "log", format_log_entry(log_entry))
-        end
+        {:ok, updated_limiter} ->
+          buffer = CircularBuffer.insert(socket.assigns.buffer, log_entry)
 
-        socket
+          socket =
+            socket
+            |> assign(:buffer, buffer)
+            |> assign(:rate_limiter, updated_limiter)
+
+          if not socket.assigns.paused and CircularBuffer.size(buffer) < @buffer_size * 0.9 do
+            push(socket, "log", format_log_entry(log_entry))
+          end
+
+          socket
+      end
     end
   end
 
   defp passes_filter?(log_entry, filters) do
-    level_match = is_nil(filters.level) or to_string(log_entry.level) == filters.level
+    level = Map.get(log_entry, :level) || Map.get(log_entry, "level")
+    component = Map.get(log_entry, :component) || Map.get(log_entry, "component")
+
+    level_match = is_nil(filters.level) or to_string(level) == filters.level
 
     component_match =
-      is_nil(filters.component) or to_string(log_entry.component) == filters.component
+      is_nil(filters.component) or to_string(component) == filters.component
 
     level_match and component_match
   end
@@ -209,9 +218,11 @@ defmodule PhoenixUiWeb.MachineChannel do
       if length(batch) > 0 do
         push(socket, "logs", Enum.map(batch, &format_log_entry/1))
 
+        new_stats = Map.update!(socket.assigns.stats, :batches_sent, &(&1 + 1))
+        
         socket
         |> assign(:buffer, buffer)
-        |> update_in([:assigns, :stats, :batches_sent], &(&1 + 1))
+        |> assign(:stats, new_stats)
       else
         socket
       end
@@ -335,10 +346,9 @@ defmodule PhoenixUiWeb.MachineChannel do
       bucket = refill(bucket)
 
       if bucket.tokens >= 1 do
-        %{bucket | tokens: bucket.tokens - 1}
-        true
+        {:ok, %{bucket | tokens: bucket.tokens - 1}}
       else
-        false
+        {:error, :rate_limited}
       end
     end
 

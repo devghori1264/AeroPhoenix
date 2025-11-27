@@ -23,7 +23,7 @@ defmodule PhoenixUiWeb.MachineChannelTest do
     test "joins with custom filters", %{socket: socket} do
       params = %{"filters" => %{"level" => "error", "component" => "fsm"}}
 
-      assert {:ok, reply, channel_socket} =
+      assert {:ok, _reply, channel_socket} =
                subscribe_and_join(socket, MachineChannel, "machine:test_machine_123", params)
 
       assert channel_socket.assigns.filters.level == "error"
@@ -63,7 +63,10 @@ defmodule PhoenixUiWeb.MachineChannelTest do
          }}
       )
 
-      assert_receive {:log_event, _log}
+      assert_push "logs", logs
+      assert is_list(logs)
+      assert length(logs) == 1
+      assert List.first(logs).message == "Test log"
     end
 
     test "emits telemetry on join", %{socket: socket} do
@@ -347,23 +350,22 @@ defmodule PhoenixUiWeb.MachineChannelTest do
     test "consumes tokens" do
       bucket = TokenBucket.new(100)
 
-      assert TokenBucket.consume(bucket)
+      assert {:ok, _bucket} = TokenBucket.consume(bucket)
     end
 
     test "refills over time" do
       bucket = TokenBucket.new(10)
 
-      bucket =
+      _bucket =
         Enum.reduce(1..10, bucket, fn _i, buck ->
-          TokenBucket.consume(buck)
-          buck
+          {:ok, new_buck} = TokenBucket.consume(buck)
+          new_buck
         end)
     end
 
     test "respects capacity limit" do
       bucket = TokenBucket.new(10)
-
-      Process.sleep(100)
+      assert bucket.capacity == 10
     end
   end
 
@@ -390,13 +392,15 @@ defmodule PhoenixUiWeb.MachineChannelTest do
         {:log_event, log_event}
       )
 
-      assert_push "log", pushed_log
-      assert pushed_log.message == "Machine started"
-      assert pushed_log.level == :info
+      assert_push "logs", logs
+      assert is_list(logs)
+      log = List.first(logs)
+      assert log.message == "Machine started"
+      assert log.level == :info
     end
 
-    test "filters logs by level" do
-      {:ok, _reply, channel_socket} =
+    test "filters logs by level", %{socket: socket} do
+      {:ok, _reply, _channel_socket} =
         subscribe_and_join(socket, MachineChannel, "machine:test_machine_456", %{
           "filters" => %{"level" => "error"}
         })
@@ -414,7 +418,7 @@ defmodule PhoenixUiWeb.MachineChannelTest do
          }}
       )
 
-      refute_push "log", _
+      refute_push "logs", _
 
       Phoenix.PubSub.broadcast(
         Orchestrator.PubSub,
@@ -429,8 +433,10 @@ defmodule PhoenixUiWeb.MachineChannelTest do
          }}
       )
 
-      assert_push "log", pushed_log
-      assert pushed_log.message == "Error message"
+      assert_push "logs", logs
+      assert is_list(logs)
+      log = List.first(logs)
+      assert log.message == "Error message"
     end
 
     test "batches multiple logs efficiently" do
@@ -449,9 +455,8 @@ defmodule PhoenixUiWeb.MachineChannelTest do
         )
       end)
 
-      for _i <- 1..10 do
-        assert_push "log", _log
-      end
+      assert_push "logs", logs
+      assert length(logs) == 10
     end
   end
 
@@ -511,7 +516,7 @@ defmodule PhoenixUiWeb.MachineChannelTest do
           TokenBucket.consume(bucket)
         end)
 
-      successful = Enum.count(results, & &1)
+      successful = Enum.count(results, fn res -> match?({:ok, _}, res) end)
 
       assert successful >= 10
     end

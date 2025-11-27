@@ -11,6 +11,7 @@ defmodule PhoenixUi.Application do
       PhoenixUi.Machines,
       PhoenixUi.Predictive,
       PhoenixUiWeb.TelemetryMetrics,
+      {Registry, keys: :unique, name: PhoenixUiWeb.SocketRegistry},
       {PhoenixUiWeb.NatsClient, []}
     ]
 
