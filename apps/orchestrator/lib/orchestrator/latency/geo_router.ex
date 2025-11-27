@@ -60,6 +60,12 @@ defmodule Orchestrator.Latency.GeoRouter do
     distance_km / @speed_of_light_km_per_ms
   end
 
+  @spec select_best_region(coordinates() | nil, keyword()) :: region_info() | nil
+  def select_best_region(nil, _opts), do: nil
+  def select_best_region(user_location, opts) do
+    select_best_region([user_location: user_location] ++ opts)
+  end
+
   @spec select_best_region(keyword()) :: region_info() | nil
   def select_best_region(opts) do
     user_location = Keyword.fetch!(opts, :user_location)
@@ -123,6 +129,11 @@ defmodule Orchestrator.Latency.GeoRouter do
 
       best_region
     end
+  end
+
+  @spec closest_regions(coordinates(), keyword()) :: [map()]
+  def closest_regions(user_location, opts) do
+    closest_regions([user_location: user_location] ++ opts)
   end
 
   @spec closest_regions(keyword()) :: [map()]

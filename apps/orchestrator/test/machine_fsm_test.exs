@@ -6,6 +6,6 @@ defmodule Orchestrator.MachineFSMTest do
     id = Ecto.UUID.generate()
     {:ok, pid} = MachineFSM.start_link(%{id: id})
     res = GenServer.call(pid, {:command, "start"})
-    assert res == {:ok, _} or res == {:error, _}
+    assert match?({:ok, _}, res) or match?({:error, _}, res)
   end
 end

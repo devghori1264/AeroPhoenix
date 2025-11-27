@@ -4,7 +4,7 @@ defmodule Orchestrator.Migration.DirtyPageTest do
   alias Orchestrator.Migration.DirtyPageTracker
   alias Orchestrator.Migration.WriteBuffer
   alias Orchestrator.Migration.IncrementalSync
-  alias Orchestrator.Migration.StateTransfer
+
 
   @moduletag :migration
 
@@ -352,7 +352,7 @@ defmodule Orchestrator.Migration.DirtyPageTest do
       :ok = DirtyPageTracker.start_tracking(machine_id)
       :ok = DirtyPageTracker.mark_dirty(machine_id, 0, 200 * 4096)
 
-      test_pid = self()
+      _test_pid = self()
 
       task =
         Task.async(fn ->

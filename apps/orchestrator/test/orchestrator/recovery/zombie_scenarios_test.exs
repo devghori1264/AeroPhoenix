@@ -419,8 +419,10 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
 
       final_result = DriftDetector.check_machine(machine_id)
 
-      assert match?({:ok, anomalies}, initial_result) when is_list(anomalies)
-      assert match?({:ok, anomalies}, final_result) when is_list(anomalies)
+      {:ok, anomalies} = initial_result
+      assert is_list(anomalies)
+      {:ok, anomalies_final} = final_result
+      assert is_list(anomalies_final)
 
       case final_result do
         {:ok, [:zombie]} ->
@@ -636,7 +638,8 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       end
 
       final_check = DriftDetector.check_machine(machine_id)
-      assert match?({:ok, anomalies}, final_check) when is_list(anomalies)
+      {:ok, anomalies} = final_check
+      assert is_list(anomalies)
     end
 
     test "handles machine with no WAL history" do

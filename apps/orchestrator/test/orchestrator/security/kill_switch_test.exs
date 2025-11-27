@@ -441,7 +441,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
       Process.sleep(200)
       health = KillSwitch.check_health(machine_id)
-      assert health in [:healthy, {:warning, _}]
+      assert health == :healthy or match?({:warning, _}, health)
 
       KillSwitch.report_metric(machine_id, :cpu_percent, 98.0)
       KillSwitch.report_metric(machine_id, :cpu_percent, 99.0)

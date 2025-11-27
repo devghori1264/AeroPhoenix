@@ -171,7 +171,7 @@ defmodule Orchestrator.MachineFSMAdvancedTest do
 
       {:ok, _pid} = MachineFSM.start_link(%{id: machine_id})
       result = MachineFSM.suspend(machine_id)
-      assert match?({:ok, _} | {:noreply, _}, result)
+      assert match?({:ok, _}, result) or match?({:noreply, _}, result)
     end
 
     test "resume is equivalent to start", %{machine_id: machine_id} do
@@ -183,7 +183,7 @@ defmodule Orchestrator.MachineFSMAdvancedTest do
 
       {:ok, pid} = MachineFSM.start_link(%{id: machine_id})
       result = MachineFSM.resume(machine_id)
-      assert match?({:ok, _} | {:noreply, _}, result)
+      assert match?({:ok, _}, result) or match?({:noreply, _}, result)
       if Process.alive?(pid), do: Process.exit(pid, :shutdown)
     end
   end
@@ -198,7 +198,7 @@ defmodule Orchestrator.MachineFSMAdvancedTest do
     test "destroyed is terminal state", %{machine_id: machine_id} do
       MachineFSM.destroy(machine_id)
       result = GenServer.call(via_tuple(machine_id), {:command, "start"})
-      assert match?({:error, _} | {:reply, {:error, _}, _} | {:ok, _}, result)
+      assert match?({:error, _}, result) or match?({:reply, {:error, _}, _}, result) or match?({:ok, _}, result)
     end
   end
 

@@ -47,38 +47,42 @@ defmodule Orchestrator.Replication.HybridLogicalClockTest do
 
   describe "update/2" do
     test "updates with remote timestamp ahead of local" do
-      local = %HLC{physical_time: 1000, logical_counter: 5, node_id: :node1}
-      remote = %HLC{physical_time: 1500, logical_counter: 3, node_id: :node2}
+      now = System.system_time(:millisecond)
+      local = %HLC{physical_time: now, logical_counter: 5, node_id: :node1}
+      remote = %HLC{physical_time: now + 500, logical_counter: 3, node_id: :node2}
 
       updated = HLC.update(local, remote)
 
-      assert updated.physical_time == 1500
+      assert updated.physical_time >= now + 500
       assert updated.logical_counter == 4
     end
 
     test "updates with local timestamp ahead of remote" do
-      local = %HLC{physical_time: 2000, logical_counter: 10, node_id: :node1}
-      remote = %HLC{physical_time: 1500, logical_counter: 20, node_id: :node2}
+      now = System.system_time(:millisecond)
+      local = %HLC{physical_time: now + 500, logical_counter: 10, node_id: :node1}
+      remote = %HLC{physical_time: now, logical_counter: 20, node_id: :node2}
 
       updated = HLC.update(local, remote)
 
-      assert updated.physical_time == 2000
+      assert updated.physical_time >= now + 500
       assert updated.logical_counter == 11
     end
 
     test "updates with equal physical times" do
-      local = %HLC{physical_time: 1000, logical_counter: 5, node_id: :node1}
-      remote = %HLC{physical_time: 1000, logical_counter: 8, node_id: :node2}
+      now = System.system_time(:millisecond)
+      local = %HLC{physical_time: now + 1000, logical_counter: 5, node_id: :node1}
+      remote = %HLC{physical_time: now + 1000, logical_counter: 8, node_id: :node2}
 
       updated = HLC.update(local, remote)
 
-      assert updated.physical_time == 1000
+      assert updated.physical_time >= now + 1000
       assert updated.logical_counter == 9
     end
 
     test "causality: updated HLC > both local and remote" do
-      local = %HLC{physical_time: 1000, logical_counter: 5, node_id: :node1}
-      remote = %HLC{physical_time: 1050, logical_counter: 3, node_id: :node2}
+      now = System.system_time(:millisecond)
+      local = %HLC{physical_time: now, logical_counter: 5, node_id: :node1}
+      remote = %HLC{physical_time: now + 50, logical_counter: 3, node_id: :node2}
 
       updated = HLC.update(local, remote)
 

@@ -150,7 +150,7 @@ defmodule Orchestrator.Migration.MigrationStream do
 
     pattern_data =
       Stream.cycle([pattern_block])
-      |> Enum.take(div(pattern_portion, byte_size(pattern_block)))
+      |> Enum.take(div(pattern_portion, byte_size(pattern_block)) + 1)
       |> Enum.join()
       |> binary_part(0, pattern_portion)
 

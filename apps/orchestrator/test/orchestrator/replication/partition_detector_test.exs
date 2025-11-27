@@ -61,7 +61,8 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
     test "requires 3 consecutive checks before status change" do
       {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
 
-      initial_status = PartitionDetector.status()
+      initial_status = PartitionDetector.get_partition_status()
+    assert initial_status == :healed
 
       Process.sleep(6_000)
       status_after_1 = PartitionDetector.status()

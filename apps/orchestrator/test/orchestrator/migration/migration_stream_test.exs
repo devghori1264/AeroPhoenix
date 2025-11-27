@@ -6,7 +6,6 @@ defmodule Orchestrator.Migration.MigrationStreamTest do
   @moduletag :migration_stream
 
   setup do
-    start_supervised!(ProgressTracker)
     :ok
   end
 
@@ -183,7 +182,7 @@ defmodule Orchestrator.Migration.MigrationStreamTest do
       assert measurements.progress <= 1.0
 
       assert_receive {[:orchestrator, :migration, :stream_completed], _ref, measurements,
-                      metadata},
+                      _metadata},
                      5000
 
       assert measurements.chunks_transferred > 0
@@ -482,7 +481,7 @@ defmodule Orchestrator.Migration.BackpressureControllerTest do
       bucket = TokenBucket.new(10, 10.0)
       start = System.monotonic_time(:millisecond)
 
-      bucket =
+      _bucket =
         Enum.reduce(1..10, bucket, fn _, acc_bucket ->
           {:ok, new_bucket} =
             BackpressureController.throttle(
@@ -512,7 +511,6 @@ defmodule Orchestrator.Migration.ProgressTrackerTest do
   @moduletag :progress_tracker
 
   setup do
-    start_supervised!(ProgressTracker)
     :ok
   end
 
@@ -648,19 +646,4 @@ defmodule Orchestrator.Migration.ProgressTrackerTest do
   end
 end
 
-defmodule :telemetry_test do
-  def attach_event_handlers(pid, events) do
-    ref = make_ref()
 
-    :telemetry.attach_many(
-      "test-#{inspect(ref)}",
-      events,
-      fn event, measurements, metadata, _ ->
-        send(pid, {event, ref, measurements, metadata})
-      end,
-      nil
-    )
-
-    ref
-  end
-end

@@ -2,7 +2,7 @@ import Config
 
 database_url =
   System.get_env("DATABASE_URL") ||
-    "ecto://postgres:postgres@localhost:5432/orchestrator_test"
+    "ecto://aerouser:aeropass@localhost:5432/orchestrator_test"
 
 config :orchestrator, Orchestrator.Repo,
   url: database_url,

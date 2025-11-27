@@ -124,7 +124,7 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
     end
 
     test "zombie batch repair doesn't exhaust capacity" do
-      machine_ids =
+      _machine_ids =
         for i <- 1..50 do
           id = "batch-zombie-#{i}-#{:rand.uniform(10_000)}"
 

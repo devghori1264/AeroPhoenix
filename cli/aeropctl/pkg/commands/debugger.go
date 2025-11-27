@@ -87,7 +87,7 @@ func RunAttach(machineID string, opts AttachOptions) error {
 
 	successMsg := color.GreenString("✓") + " Connected to machine " +
 		color.CyanString(machineID) + "\n"
-	fmt.Fprintf(os.Stderr, successMsg)
+	fmt.Fprint(os.Stderr, successMsg)
 	fmt.Fprintf(os.Stderr, "Press %s to detach\n\n",
 		color.YellowString("Ctrl+D"))
 
@@ -665,7 +665,7 @@ func watchFSMState(client *debugger.Client, machineID string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	fmt.Println("Watching FSM state changes... (Press Ctrl+C to exit)\n")
+	fmt.Println("Watching FSM state changes... (Press Ctrl+C to exit)")
 
 	for {
 		select {
