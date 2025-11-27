@@ -12,9 +12,7 @@ defmodule Orchestrator.Security.VaultTest do
 
     machine_id = "test_machine_#{:rand.uniform(100_000)}"
 
-    on_exit(fn ->
-      Vault.revoke_secret(machine_id)
-    end)
+
 
     {:ok, machine_id: machine_id}
   end

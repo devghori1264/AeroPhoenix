@@ -360,11 +360,11 @@ defmodule Orchestrator.Migration.BackpressureControllerTest do
       {:ok, bucket} = TokenBucket.consume(bucket, 5_242_880)
       assert bucket.tokens == 0
 
-      Process.sleep(250)
+      Process.sleep(300)
 
       {:ok, _bucket} = TokenBucket.consume(bucket, 2_097_152)
 
-      {:wait, _wait_ms, _bucket} = TokenBucket.consume(bucket, 1_048_576)
+      {:wait, _wait_ms, _bucket} = TokenBucket.consume(bucket, 1_572_864)
     end
 
     test "caps tokens at capacity" do

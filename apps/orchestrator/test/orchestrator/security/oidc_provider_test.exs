@@ -1,9 +1,10 @@
 defmodule Orchestrator.Security.OIDCProviderTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Orchestrator.Security.OIDCProvider
 
   setup do
+    Supervisor.terminate_child(Orchestrator.Supervisor, Orchestrator.Security.OIDCProvider)
     start_supervised!(OIDCProvider)
 
     machine_id = "test_machine_#{:rand.uniform(1_000_000)}"
@@ -396,7 +397,7 @@ defmodule Orchestrator.Security.OIDCProviderTest do
       self_pid = self()
 
       :telemetry.attach(
-        "test-token-issued-#{ref}",
+        "test-token-issued-#{inspect(ref)}",
         [:orchestrator, :oidc, :token_issued],
         fn _event, measurements, metadata, _config ->
           send(self_pid, {:telemetry, measurements, metadata})
@@ -418,7 +419,7 @@ defmodule Orchestrator.Security.OIDCProviderTest do
       assert metadata.region == "iad"
       assert is_binary(metadata.jti)
 
-      :telemetry.detach("test-token-issued-#{ref}")
+      :telemetry.detach("test-token-issued-#{inspect(ref)}")
     end
 
     test "emits token_revoked event", %{machine_id: machine_id} do
@@ -433,7 +434,7 @@ defmodule Orchestrator.Security.OIDCProviderTest do
       self_pid = self()
 
       :telemetry.attach(
-        "test-token-revoked-#{ref}",
+        "test-token-revoked-#{inspect(ref)}",
         [:orchestrator, :oidc, :token_revoked],
         fn _event, _measurements, metadata, _config ->
           send(self_pid, {:telemetry, metadata})
@@ -446,7 +447,7 @@ defmodule Orchestrator.Security.OIDCProviderTest do
       assert_receive {:telemetry, metadata}, 1000
       assert is_binary(metadata.jti)
 
-      :telemetry.detach("test-token-revoked-#{ref}")
+      :telemetry.detach("test-token-revoked-#{inspect(ref)}")
     end
   end
 end

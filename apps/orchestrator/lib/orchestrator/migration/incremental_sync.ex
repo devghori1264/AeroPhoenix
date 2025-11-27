@@ -210,7 +210,7 @@ defmodule Orchestrator.Migration.IncrementalSync do
       )
 
     case sync_result do
-      {:ok, pages_synced} ->
+      {:ok, %{pages_transferred: pages_synced}} ->
         page_numbers = Enum.map(dirty_pages, & &1.page_number)
         :ok = DirtyPageTracker.clear_synced_pages(sync_state.machine_id, page_numbers)
 

@@ -15,10 +15,7 @@ defmodule Orchestrator.Migration.DirtyPageTest do
 
     machine_id = "test_machine_#{:rand.uniform(100_000)}"
 
-    on_exit(fn ->
-      DirtyPageTracker.stop_tracking(machine_id)
-      WriteBuffer.stop_buffering(machine_id)
-    end)
+
 
     {:ok, machine_id: machine_id}
   end

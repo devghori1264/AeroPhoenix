@@ -57,9 +57,10 @@ defmodule Orchestrator.MixProject do
       {:uuid, "~> 1.1"},
       {:exqlite, "~> 0.16"},
       {:jose, "~> 1.11"},
-      {:grpc, "~> 0.5.0"},
-      {:protobuf, "~> 0.10.0"},
-      {:uniq, "~> 0.6.0"}
+      {:grpc, "~> 0.9"},
+      {:protobuf, "~> 0.11"},
+      {:uniq, "~> 0.6.0"},
+      {:bypass, github: "PSPDFKit-labs/bypass", only: :test}
     ]
   end
 

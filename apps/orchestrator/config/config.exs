@@ -5,7 +5,7 @@ config :orchestrator,
   http: [
     timeout: 5_000,
     recv_timeout: 5_000,
-    base_url: System.get_env("FLYD_SIM_URL", "http://localhost:8080")
+    base_url: System.get_env("FLYD_URL") || System.get_env("FLYD_SIM_URL") || "http://localhost:8080"
   ]
 
 config :orchestrator, OrchestratorWeb.Endpoint,
