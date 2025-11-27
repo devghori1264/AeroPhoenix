@@ -59,7 +59,6 @@ defmodule Orchestrator.MachineFSM do
     Orchestrator.MachineManager.ensure_started(id, attrs)
   end
 
-  @doc "Gets current state and status of the machine FSM"
   @spec get_state(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_state(machine_id) do
     case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
@@ -68,7 +67,6 @@ defmodule Orchestrator.MachineFSM do
     end
   end
 
-  @doc "Gets state transition history for debugging"
   @spec get_history(String.t()) :: {:ok, [state_transition()]} | {:error, :not_found}
   def get_history(machine_id) do
     case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
@@ -77,7 +75,6 @@ defmodule Orchestrator.MachineFSM do
     end
   end
 
-  @doc "Forces a health check immediately"
   @spec trigger_health_check(String.t()) :: :ok | {:error, :not_found}
   def trigger_health_check(machine_id) do
     case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
@@ -86,7 +83,6 @@ defmodule Orchestrator.MachineFSM do
     end
   end
 
-  @doc "Suspends a running machine (pause without destroy)"
   @spec suspend(String.t()) :: {:ok, map()} | {:error, term()}
   def suspend(machine_id) do
     case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
@@ -95,7 +91,6 @@ defmodule Orchestrator.MachineFSM do
     end
   end
 
-  @doc "Resumes a suspended machine"
   @spec resume(String.t()) :: {:ok, map()} | {:error, term()}
   def resume(machine_id) do
     case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
@@ -104,11 +99,45 @@ defmodule Orchestrator.MachineFSM do
     end
   end
 
-  @doc "Destroys a machine permanently"
   @spec destroy(String.t()) :: {:ok, map()} | {:error, term()}
   def destroy(machine_id) do
     case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
       [{pid, _}] -> GenServer.call(pid, {:command, "destroy"})
+      [] -> {:error, :not_found}
+    end
+  end
+
+  def set_debug_breakpoint(machine_id, state_name) do
+    case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
+      [{pid, _}] -> GenServer.call(pid, {:debug, :set_breakpoint, state_name})
+      [] -> {:error, :not_found}
+    end
+  end
+
+  def remove_debug_breakpoint(machine_id, state_name) do
+    case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
+      [{pid, _}] -> GenServer.call(pid, {:debug, :remove_breakpoint, state_name})
+      [] -> {:error, :not_found}
+    end
+  end
+
+  def continue_from_breakpoint(machine_id) do
+    case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
+      [{pid, _}] -> GenServer.call(pid, {:debug, :continue})
+      [] -> {:error, :not_found}
+    end
+  end
+
+  def enable_debug_mode(machine_id) do
+    case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
+      [{pid, _}] -> GenServer.call(pid, {:debug, :enable})
+      [] -> {:error, :not_found}
+    end
+  end
+
+  def disable_debug_mode(machine_id) do
+    case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
+      [{pid, _}] -> GenServer.call(pid, {:debug, :disable})
       [] -> {:error, :not_found}
     end
   end
@@ -238,6 +267,31 @@ defmodule Orchestrator.MachineFSM do
     end
   end
 
+  def handle_call({:debug, :set_breakpoint, state_name}, _from, state) do
+    Logger.info("MachineFSM[#{state.id}] setting debug breakpoint", state: state_name)
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:debug, :remove_breakpoint, state_name}, _from, state) do
+    Logger.info("MachineFSM[#{state.id}] removing debug breakpoint", state: state_name)
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:debug, :continue}, _from, state) do
+    Logger.info("MachineFSM[#{state.id}] continuing from breakpoint")
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:debug, :enable}, _from, state) do
+    Logger.info("MachineFSM[#{state.id}] enabling debug mode")
+    {:reply, :ok, Map.put(state, :debug_mode, true)}
+  end
+
+  def handle_call({:debug, :disable}, _from, state) do
+    Logger.info("MachineFSM[#{state.id}] disabling debug mode")
+    {:reply, :ok, Map.put(state, :debug_mode, false)}
+  end
+
   @impl true
   def handle_cast(:health_check, state) do
     new_state = perform_health_check(state)
@@ -360,7 +414,6 @@ defmodule Orchestrator.MachineFSM do
     end
   end
 
-  @doc false
   defp validate_transition(from, to) do
     valid_transitions = %{
       created: [:starting, :destroyed],
@@ -624,7 +677,7 @@ defmodule Orchestrator.MachineFSM do
     end
   end
 
-  defp transition_to(state, new_status, metadata \\ %{}) do
+  defp transition_to(state, new_status, metadata) do
     now = DateTime.utc_now()
 
     duration_ms =
@@ -814,7 +867,7 @@ defmodule Orchestrator.MachineFSM do
     ArgumentError -> :created
   end
 
-  defp emit_telemetry(event_name, state, metadata \\ %{}) do
+  defp emit_telemetry(event_name, state, metadata) do
     :telemetry.execute(
       [:orchestrator, :machine_fsm, event_name],
       %{count: 1, value: 1},

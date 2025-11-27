@@ -2,6 +2,7 @@ defmodule Orchestrator.Metrics.SLADefinition do
   use Ecto.Schema
   import Ecto.Changeset
   import Ecto.Query
+  require Logger
   alias Orchestrator.Repo
   alias Orchestrator.Metrics.{MetricDefinition, SLAViolation}
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -27,7 +28,6 @@ defmodule Orchestrator.Metrics.SLADefinition do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc false
   def changeset(sla, attrs) do
     sla
     |> cast(attrs, [
@@ -159,6 +159,7 @@ defmodule Orchestrator.Metrics.SLADefinition do
          }}
 
       error ->
+        Logger.error("SLA compliance calculation failed: #{inspect(error)}")
         {:error, :calculation_failed}
     end
   end

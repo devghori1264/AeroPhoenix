@@ -1,7 +1,7 @@
 defmodule OrchestratorWeb.EventController do
   use OrchestratorWeb, :controller
   require Logger
-  alias Orchestrator.{Repo, Event, EventSnapshot}
+  alias Orchestrator.Repo
   import Ecto.Query
 
   def list_aggregates(conn, params) do

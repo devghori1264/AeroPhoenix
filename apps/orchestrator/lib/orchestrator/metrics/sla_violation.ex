@@ -19,7 +19,6 @@ defmodule Orchestrator.Metrics.SLAViolation do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc false
   def changeset(violation, attrs) do
     violation
     |> cast(attrs, [

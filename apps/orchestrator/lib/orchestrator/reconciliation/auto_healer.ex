@@ -457,7 +457,7 @@ defmodule Orchestrator.Reconciliation.AutoHealer do
     result
   end
 
-  defp update_machine_configuration(machine_id, field, value, config) do
+  defp update_machine_configuration(machine_id, field, value, _config) do
     case Manager.get_machine(machine_id) do
       {:ok, machine} ->
         region = machine.target_region || machine.region
@@ -475,7 +475,7 @@ defmodule Orchestrator.Reconciliation.AutoHealer do
     end
   end
 
-  defp update_machine_resources(machine_id, field, value, config) do
+  defp update_machine_resources(machine_id, field, value, _config) do
     case Manager.get_machine(machine_id) do
       {:ok, machine} ->
         region = machine.target_region || machine.region
@@ -486,7 +486,7 @@ defmodule Orchestrator.Reconciliation.AutoHealer do
     end
   end
 
-  defp update_machine_network(machine_id, field, value, config) do
+  defp update_machine_network(machine_id, field, value, _config) do
     case Manager.get_machine(machine_id) do
       {:ok, machine} ->
         region = machine.target_region || machine.region
@@ -497,12 +497,12 @@ defmodule Orchestrator.Reconciliation.AutoHealer do
     end
   end
 
-  defp resync_machine_storage(machine_id, _field, config) do
+  defp resync_machine_storage(machine_id, _field, _config) do
     Logger.warning("Storage resync not yet implemented", machine_id: machine_id)
     {:error, :not_implemented}
   end
 
-  defp verify_and_repair_data(machine_id, config) do
+  defp verify_and_repair_data(machine_id, _config) do
     Logger.warning("Data verification not yet implemented", machine_id: machine_id)
     {:error, :not_implemented}
   end
@@ -535,7 +535,7 @@ defmodule Orchestrator.Reconciliation.AutoHealer do
     :ok
   end
 
-  defp execute_rollback_to_source(machine_id, source_info, config) do
+  defp execute_rollback_to_source(machine_id, source_info, _config) do
     case Manager.get_machine(machine_id) do
       {:ok, machine} ->
         target_region = machine.target_region
@@ -585,12 +585,12 @@ defmodule Orchestrator.Reconciliation.AutoHealer do
     end
   end
 
-  defp get_recent_healing_attempts(machine_id) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-@healing_window_minutes * 60, :second)
+  defp get_recent_healing_attempts(_machine_id) do
+    _cutoff = DateTime.utc_now() |> DateTime.add(-@healing_window_minutes * 60, :second)
     []
   end
 
-  defp record_healing_attempt(machine_id) do
+  defp record_healing_attempt(_machine_id) do
     :ok
   end
 

@@ -1,6 +1,7 @@
 defmodule Orchestrator.Placement.LatencyOptimizer do
   require Logger
-  alias Orchestrator.{Repo, Machine, Region}
+  import Ecto.Query
+  alias Orchestrator.{Repo, Machine}
   @default_latency_weight 0.4
   @default_affinity_weight 0.3
   @default_distribution_weight 0.3
@@ -15,9 +16,27 @@ defmodule Orchestrator.Placement.LatencyOptimizer do
     :distribution_requirements,
     :optimization_mode,
     :weights,
-    :constraints,
-    :telemetry_backend
+    :constraints
   ]
+
+  def optimize_placements(machines, options \\ []) do
+    {:ok, candidates} = suggest_migrations(options)
+
+    machine_ids = Enum.map(machines, & &1.id)
+    relevant_candidates = Enum.filter(candidates, fn c -> c.machine.id in machine_ids end)
+
+    total_improvement = Enum.reduce(relevant_candidates, 0.0, &(&1.improvement + &2))
+
+    avg_improvement =
+      if length(relevant_candidates) > 0,
+        do: total_improvement / length(relevant_candidates),
+        else: 0.0
+
+    %{
+      improved_placements: relevant_candidates,
+      average_latency_improvement: avg_improvement
+    }
+  end
 
   def find_optimal_placement(machine_spec, options \\ []) do
     optimizer = build_optimizer(options)
@@ -64,7 +83,7 @@ defmodule Orchestrator.Placement.LatencyOptimizer do
   end
 
   def suggest_migrations(options \\ []) do
-    optimizer = build_optimizer(options)
+    _optimizer = build_optimizer(options)
     threshold = options[:improvement_threshold] || 0.15
     machines = Repo.all(Machine)
 
@@ -250,7 +269,7 @@ defmodule Orchestrator.Placement.LatencyOptimizer do
     end
   end
 
-  defp score_affinity(optimizer, region, machine_spec) do
+  defp score_affinity(optimizer, region, _machine_spec) do
     affinity_rules = optimizer.affinity_rules || []
     anti_affinity_rules = optimizer.anti_affinity_rules || []
 
@@ -308,7 +327,7 @@ defmodule Orchestrator.Placement.LatencyOptimizer do
     end
   end
 
-  defp load_latency_matrix(optimizer, regions) do
+  defp load_latency_matrix(_optimizer, regions) do
     case get_cached_latency_matrix() do
       {:ok, matrix} ->
         matrix
@@ -446,23 +465,40 @@ defmodule Orchestrator.Placement.LatencyOptimizer do
   end
 
   defp region_available?(region) do
-    true
+    valid_regions = ["us-east-1", "us-west-2", "eu-west-1", "ap-south-1", "lax", "ord", "iad"]
+    region in valid_regions
   end
 
-  defp get_related_machines(_machine) do
-    []
+  defp get_related_machines(machine) do
+    app_name = machine.metadata["app_name"]
+
+    if app_name do
+      Repo.all(
+        from(m in Machine,
+          where: fragment("metadata->>'app_name' = ?", ^app_name) and m.id != ^machine.id
+        )
+      )
+    else
+      []
+    end
   end
 
-  defp get_related_machines_for_spec(_machine_spec) do
-    []
+  defp get_related_machines_for_spec(machine_spec) do
+    app_name = machine_spec[:metadata]["app_name"] || machine_spec[:app_name]
+
+    if app_name do
+      Repo.all(from(m in Machine, where: fragment("metadata->>'app_name' = ?", ^app_name)))
+    else
+      []
+    end
   end
 
   defp calculate_latency_score(optimizer, machine, related_machines) do
     score_latency(optimizer, machine.region, related_machines)
   end
 
-  defp calculate_affinity_score(optimizer, machine, related_machines) do
-    1.0
+  defp calculate_affinity_score(optimizer, machine, _related_machines) do
+    score_affinity(optimizer, machine.region, %{metadata: machine.metadata})
   end
 
   defp calculate_distribution_score(machine) do
@@ -471,26 +507,42 @@ defmodule Orchestrator.Placement.LatencyOptimizer do
 
   defp generate_recommendations(machine, score) do
     if score < 0.5 do
-      ["Consider migrating to a region closer to related machines"]
+      ["Consider migrating machine #{machine.id} to a region closer to related machines"]
     else
       []
     end
   end
 
   defp estimate_migration_time(machine, target_region) do
-    "~5 minutes"
+    disk_size_gb = String.to_integer(machine.metadata["disk_size_gb"] || "10")
+    distance_factor = if machine.region == target_region, do: 1.0, else: 2.0
+
+    minutes = round(disk_size_gb * distance_factor)
+    "~#{minutes} minutes"
   end
 
-  defp get_latency_details(_optimizer, _region, _related_machines) do
-    %{}
+  defp get_latency_details(optimizer, region, related_machines) do
+    Enum.map(related_machines, fn m ->
+      %{
+        machine_id: m.id,
+        region: m.region,
+        latency: get_latency(optimizer.latency_matrix, region, m.region)
+      }
+    end)
   end
 
-  defp get_affinity_details(_optimizer, _region, _machine_spec) do
-    %{}
+  defp get_affinity_details(optimizer, region, machine_spec) do
+    %{
+      affinity_score: score_affinity(optimizer, region, machine_spec),
+      rules_matched: length(optimizer.affinity_rules)
+    }
   end
 
-  defp get_distribution_details(_region) do
-    %{}
+  defp get_distribution_details(region) do
+    %{
+      region_capacity: get_region_capacity(region),
+      current_load: score_distribution(region)
+    }
   end
 
   defp get_region_capacity(_region) do

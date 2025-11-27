@@ -19,7 +19,6 @@ defmodule Orchestrator.Metrics.MetricSample do
     field(:region, :string)
   end
 
-  @doc false
   def changeset(sample, attrs) do
     sample
     |> cast(attrs, [

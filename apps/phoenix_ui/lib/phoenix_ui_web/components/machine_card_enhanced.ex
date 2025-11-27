@@ -2,8 +2,8 @@ defmodule PhoenixUiWeb.MachineCardEnhanced do
   use Phoenix.Component
   import PhoenixUiWeb.CoreComponents
 
-  attr :machine, :map, required: false, default: nil
-  attr :class, :string, default: ""
+  attr(:machine, :map, required: false, default: nil)
+  attr(:class, :string, default: "")
 
   def render(assigns) do
     ~H"""

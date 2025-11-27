@@ -23,7 +23,6 @@ defmodule Orchestrator.Metrics.DashboardPanel do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc false
   def changeset(panel, attrs) do
     panel
     |> cast(attrs, [

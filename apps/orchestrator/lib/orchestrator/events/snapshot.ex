@@ -29,7 +29,6 @@ defmodule Orchestrator.Events.Snapshot do
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 
-  @doc false
   def changeset(snapshot, attrs) do
     snapshot
     |> cast(attrs, [

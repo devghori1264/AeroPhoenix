@@ -26,7 +26,6 @@ defmodule Orchestrator.Metrics.Dashboard do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc false
   def changeset(dashboard, attrs) do
     dashboard
     |> cast(attrs, [

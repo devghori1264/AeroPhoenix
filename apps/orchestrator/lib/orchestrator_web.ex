@@ -42,6 +42,12 @@ defmodule OrchestratorWeb do
     end
   end
 
+  def channel do
+    quote do
+      use Phoenix.Channel
+    end
+  end
+
   defp html_helpers do
     quote do
       import Phoenix.HTML

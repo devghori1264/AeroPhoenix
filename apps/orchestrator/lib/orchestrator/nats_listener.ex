@@ -6,12 +6,15 @@ defmodule Orchestrator.NatsListener do
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
   def init(_) do
-    if Code.ensure_loaded?(:gnat) do
+    if Code.ensure_loaded?(Gnat) do
       try do
-        case :gnat.start_link(%{host: @nats_url}) do
+        uri = URI.parse(@nats_url)
+        opts = %{host: uri.host, port: uri.port || 4222}
+
+        case Gnat.start_link(opts) do
           {:ok, conn} ->
-            :gnat.sub(conn, self(), "machines.events")
-            :gnat.sub(conn, self(), "ui.actions")
+            Gnat.sub(conn, self(), "machines.events")
+            Gnat.sub(conn, self(), "ui.actions")
             Logger.info("NATS connected and subscriptions set")
             {:ok, conn}
 

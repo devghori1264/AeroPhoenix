@@ -13,11 +13,12 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
   @min_batch_size 1_048_576
   @max_batch_size 16_777_216
   @parallelism 4
-  @bandwidth_limit_mbps 1000
-  @spec transfer_incremental(String.t(), String.t(), String.t(), map()) ::
+
+  @spec transfer_incremental(String.t(), String.t(), String.t(), String.t(), map()) ::
           {:ok, transfer_result()} | {:error, term()}
-  def transfer_incremental(checkpoint_id, source_region, target_region, opts \\ %{}) do
+  def transfer_incremental(machine_id, checkpoint_id, source_region, target_region, opts \\ %{}) do
     Logger.info("Starting incremental state transfer",
+      machine_id: machine_id,
       checkpoint_id: checkpoint_id,
       source: source_region,
       target: target_region
@@ -25,10 +26,11 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
 
     start_time = System.monotonic_time(:millisecond)
 
-    with {:ok, dirty_pages} <- get_dirty_pages(checkpoint_id, source_region),
+    with {:ok, dirty_pages} <- get_dirty_pages(machine_id, checkpoint_id, source_region),
          {:ok, transfer_stats} <-
            transfer_pages(
              dirty_pages,
+             machine_id,
              source_region,
              target_region,
              opts
@@ -73,19 +75,21 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
     end
   end
 
-  @spec transfer_final(String.t(), String.t(), String.t(), map()) ::
+  @spec transfer_final(String.t(), String.t(), String.t(), String.t(), map()) ::
           {:ok, transfer_result()} | {:error, term()}
-  def transfer_final(checkpoint_id, source_region, target_region, opts \\ %{}) do
+  def transfer_final(machine_id, checkpoint_id, source_region, target_region, opts \\ %{}) do
     Logger.info("Starting final state transfer (source frozen)",
+      machine_id: machine_id,
       checkpoint_id: checkpoint_id
     )
 
     start_time = System.monotonic_time(:millisecond)
 
-    with {:ok, dirty_pages} <- get_dirty_pages(checkpoint_id, source_region),
+    with {:ok, dirty_pages} <- get_dirty_pages(machine_id, checkpoint_id, source_region),
          {:ok, transfer_stats} <-
            transfer_pages(
              dirty_pages,
+             machine_id,
              source_region,
              target_region,
              Map.put(opts, :priority, :high)
@@ -128,16 +132,17 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
     end
   end
 
-  @spec transfer_post_copy(String.t(), String.t(), String.t(), map()) ::
+  @spec transfer_post_copy(String.t(), String.t(), String.t(), String.t(), map()) ::
           {:ok, transfer_result()} | {:error, term()}
-  def transfer_post_copy(checkpoint_id, source_region, target_region, opts \\ %{}) do
+  def transfer_post_copy(machine_id, checkpoint_id, source_region, target_region, opts \\ %{}) do
     Logger.info("Starting post-copy state transfer", checkpoint_id: checkpoint_id)
     start_time = System.monotonic_time(:millisecond)
 
-    with {:ok, critical_pages} <- get_critical_pages(checkpoint_id, source_region),
+    with {:ok, critical_pages} <- get_critical_pages(machine_id, checkpoint_id, source_region),
          {:ok, transfer_stats} <-
            transfer_pages(
              critical_pages,
+             machine_id,
              source_region,
              target_region,
              Map.put(opts, :priority, :critical)
@@ -173,7 +178,7 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
     end
   end
 
-  defp transfer_pages(pages, source_region, target_region, opts) do
+  defp transfer_pages(pages, machine_id, source_region, target_region, opts) do
     parallelism = Map.get(opts, :parallelism, @parallelism)
     batch_size = Map.get(opts, :batch_size, @default_batch_size)
 
@@ -188,9 +193,7 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
     results =
       Task.async_stream(
         batches,
-        fn batch ->
-          transfer_batch(batch, source_region, target_region, opts)
-        end,
+        fn batch -> transfer_batch(batch, machine_id, source_region, target_region, opts) end,
         max_concurrency: parallelism,
         timeout: 300_000
       )
@@ -205,7 +208,7 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
     end
   end
 
-  defp transfer_batch(pages, source_region, target_region, opts) do
+  defp transfer_batch(pages, machine_id, source_region, target_region, opts) do
     Logger.debug("Transferring batch", page_count: length(pages))
     batch_start = System.monotonic_time(:millisecond)
 
@@ -213,7 +216,7 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
          compressed_data <- maybe_compress(page_data, opts),
          {:ok, checksum} <- calculate_checksum(compressed_data, opts),
          :ok <- send_to_target(compressed_data, checksum, target_region, opts),
-         :ok <- verify_transfer(checksum, target_region, opts) do
+         :ok <- verify_transfer(machine_id, checksum, target_region, opts) do
       duration = System.monotonic_time(:millisecond) - batch_start
 
       {:ok,
@@ -257,9 +260,9 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
     end
   end
 
-  defp verify_transfer(checksum, target_region, opts) do
+  defp verify_transfer(machine_id, checksum, target_region, opts) do
     if Map.get(opts, :verify_checksums, true) do
-      case FlydClient.verify_pages_checksum(target_region, checksum) do
+      case FlydClient.verify_pages_checksum(target_region, machine_id, checksum) do
         :ok ->
           :ok
 
@@ -275,8 +278,8 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
     end
   end
 
-  defp get_dirty_pages(checkpoint_id, source_region) do
-    case FlydClient.get_dirty_pages_since_checkpoint(source_region, checkpoint_id) do
+  defp get_dirty_pages(machine_id, checkpoint_id, source_region) do
+    case FlydClient.get_dirty_pages_since_checkpoint(source_region, machine_id, checkpoint_id) do
       {:ok, pages} ->
         {:ok, pages}
 
@@ -289,7 +292,7 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
     end
   end
 
-  defp get_critical_pages(checkpoint_id, source_region) do
+  defp get_critical_pages(_machine_id, checkpoint_id, source_region) do
     case FlydClient.get_critical_pages(source_region, checkpoint_id) do
       {:ok, pages} ->
         {:ok, pages}

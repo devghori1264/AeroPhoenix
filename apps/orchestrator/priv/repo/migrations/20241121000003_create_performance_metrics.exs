@@ -1,9 +1,11 @@
 defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
   use Ecto.Migration
+
   def up do
     execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
     execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     execute("CREATE EXTENSION IF NOT EXISTS btree_gin")
+
     execute("""
     CREATE TYPE metric_type AS ENUM (
       'counter',           -- Monotonically increasing value (requests, errors)
@@ -12,6 +14,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       'summary'            -- Pre-calculated statistics (p50, p95, p99)
     )
     """)
+
     execute("""
     CREATE TYPE metric_unit AS ENUM (
       'none',              -- Unitless (count, ratio)
@@ -23,6 +26,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       'ops_per_sec'        -- Operations rate
     )
     """)
+
     execute("""
     CREATE TYPE alert_severity AS ENUM (
       'info',
@@ -30,6 +34,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       'critical'
     )
     """)
+
     execute("""
     CREATE TYPE alert_state AS ENUM (
       'pending',          -- Alert condition met, waiting for duration
@@ -39,6 +44,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       'acked'             -- Alert acknowledged
     )
     """)
+
     execute("""
     CREATE TYPE aggregation_function AS ENUM (
       'avg',
@@ -54,6 +60,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       'rate'
     )
     """)
+
     execute("""
     CREATE TYPE sla_status AS ENUM (
       'meeting',          -- Currently meeting SLA
@@ -62,41 +69,47 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       'recovering'        -- Recovering from violation
     )
     """)
+
     create table(:metric_definitions, primary_key: false) do
-      add :id, :uuid, primary_key: true
-      add :name, :string, null: false, comment: "Metric name (e.g., http_requests_total)"
-      add :type, :metric_type, null: false
-      add :unit, :metric_unit, null: false, default: "none"
-      add :help, :text, comment: "Human-readable description"
-      add :namespace, :string, comment: "Metric namespace (e.g., orchestrator, machine)"
-      add :subsystem, :string, comment: "Subsystem name (e.g., api, database)"
-      add :label_keys, {:array, :string}, default: [], comment: "Valid label keys"
-      add :cardinality, :integer, default: 0, comment: "Number of unique time series"
-      add :retention_days, :integer, default: 90
-      add :compression_enabled, :boolean, default: true
-      add :compress_after_hours, :integer, default: 1
-      add :enabled, :boolean, default: true
-      add :created_by, :uuid, comment: "User who created this metric"
+      add(:id, :uuid, primary_key: true)
+      add(:name, :string, null: false, comment: "Metric name (e.g., http_requests_total)")
+      add(:type, :metric_type, null: false)
+      add(:unit, :metric_unit, null: false, default: "none")
+      add(:help, :text, comment: "Human-readable description")
+      add(:namespace, :string, comment: "Metric namespace (e.g., orchestrator, machine)")
+      add(:subsystem, :string, comment: "Subsystem name (e.g., api, database)")
+      add(:label_keys, {:array, :string}, default: [], comment: "Valid label keys")
+      add(:cardinality, :integer, default: 0, comment: "Number of unique time series")
+      add(:retention_days, :integer, default: 90)
+      add(:compression_enabled, :boolean, default: true)
+      add(:compress_after_hours, :integer, default: 1)
+      add(:enabled, :boolean, default: true)
+      add(:created_by, :uuid, comment: "User who created this metric")
       timestamps(type: :utc_datetime_usec)
     end
-    create unique_index(:metric_definitions, [:name])
-    create index(:metric_definitions, [:namespace, :subsystem])
-    create index(:metric_definitions, [:type])
-    create index(:metric_definitions, [:enabled])
+
+    create(unique_index(:metric_definitions, [:name]))
+    create(index(:metric_definitions, [:namespace, :subsystem]))
+    create(index(:metric_definitions, [:type]))
+    create(index(:metric_definitions, [:enabled]))
+
     create table(:metric_samples, primary_key: false) do
-      add :metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
+      add(:metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
         null: false
-      add :timestamp, :utc_datetime_usec, null: false, comment: "Sample timestamp"
-      add :labels, :jsonb, default: "{}", comment: "Label key-value pairs"
-      add :labels_hash, :string, comment: "Hash of labels for fast lookups"
-      add :value, :float, null: false, comment: "Metric value"
-      add :bucket_values, :jsonb, comment: "Histogram bucket counts"
-      add :quantile_values, :jsonb, comment: "Summary quantile values"
-      add :count, :bigint, comment: "Sample count (histogram/summary)"
-      add :sum, :float, comment: "Sum of values (histogram/summary)"
-      add :machine_id, :uuid, comment: "Source machine ID"
-      add :region, :string, comment: "Source region"
+      )
+
+      add(:timestamp, :utc_datetime_usec, null: false, comment: "Sample timestamp")
+      add(:labels, :jsonb, default: "{}", comment: "Label key-value pairs")
+      add(:labels_hash, :string, comment: "Hash of labels for fast lookups")
+      add(:value, :float, null: false, comment: "Metric value")
+      add(:bucket_values, :jsonb, comment: "Histogram bucket counts")
+      add(:quantile_values, :jsonb, comment: "Summary quantile values")
+      add(:count, :bigint, comment: "Sample count (histogram/summary)")
+      add(:sum, :float, comment: "Sum of values (histogram/summary)")
+      add(:machine_id, :uuid, comment: "Source machine ID")
+      add(:region, :string, comment: "Source region")
     end
+
     execute("""
     SELECT create_hypertable(
       'metric_samples',
@@ -105,11 +118,13 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       if_not_exists => TRUE
     )
     """)
-    create index(:metric_samples, [:metric_id, :timestamp])
-    create index(:metric_samples, [:labels_hash])
-    create index(:metric_samples, [:machine_id])
-    create index(:metric_samples, [:region])
+
+    create(index(:metric_samples, [:metric_id, :timestamp]))
+    create(index(:metric_samples, [:labels_hash]))
+    create(index(:metric_samples, [:machine_id]))
+    create(index(:metric_samples, [:region]))
     execute("CREATE INDEX metric_samples_labels_gin ON metric_samples USING GIN (labels)")
+
     execute("""
     SELECT add_compression_policy(
       'metric_samples',
@@ -117,6 +132,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       if_not_exists => TRUE
     )
     """)
+
     execute("""
     SELECT add_retention_policy(
       'metric_samples',
@@ -124,27 +140,31 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       if_not_exists => TRUE
     )
     """)
+
     create table(:metric_aggregates, primary_key: false) do
-      add :metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
+      add(:metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
         null: false
-      add :timestamp, :utc_datetime_usec, null: false
-      add :interval, :string, null: false, comment: "1m, 5m, 1h, 1d, 1w"
-      add :labels, :jsonb, default: "{}"
-      add :labels_hash, :string
-      add :avg, :float
-      add :sum, :float
-      add :min, :float
-      add :max, :float
-      add :count, :bigint
-      add :stddev, :float
-      add :p50, :float
-      add :p90, :float
-      add :p95, :float
-      add :p99, :float
-      add :rate, :float, comment: "Per-second rate"
-      add :machine_id, :uuid
-      add :region, :string
+      )
+
+      add(:timestamp, :utc_datetime_usec, null: false)
+      add(:interval, :string, null: false, comment: "1m, 5m, 1h, 1d, 1w")
+      add(:labels, :jsonb, default: "{}")
+      add(:labels_hash, :string)
+      add(:avg, :float)
+      add(:sum, :float)
+      add(:min, :float)
+      add(:max, :float)
+      add(:count, :bigint)
+      add(:stddev, :float)
+      add(:p50, :float)
+      add(:p90, :float)
+      add(:p95, :float)
+      add(:p99, :float)
+      add(:rate, :float, comment: "Per-second rate")
+      add(:machine_id, :uuid)
+      add(:region, :string)
     end
+
     execute("""
     SELECT create_hypertable(
       'metric_aggregates',
@@ -153,9 +173,11 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       if_not_exists => TRUE
     )
     """)
-    create index(:metric_aggregates, [:metric_id, :interval, :timestamp])
-    create index(:metric_aggregates, [:labels_hash])
+
+    create(index(:metric_aggregates, [:metric_id, :interval, :timestamp]))
+    create(index(:metric_aggregates, [:labels_hash]))
     execute("CREATE INDEX metric_aggregates_labels_gin ON metric_aggregates USING GIN (labels)")
+
     execute("""
     SELECT add_compression_policy(
       'metric_aggregates',
@@ -163,6 +185,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       if_not_exists => TRUE
     )
     """)
+
     execute("""
     SELECT add_retention_policy(
       'metric_aggregates',
@@ -170,219 +193,259 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
       if_not_exists => TRUE
     )
     """)
+
     create table(:alert_rules) do
-      add :id, :uuid, primary_key: true
-      add :name, :string, null: false
-      add :severity, :alert_severity, null: false
-      add :enabled, :boolean, default: true
-      add :metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all)
-      add :query, :text, null: false, comment: "PromQL-style query"
-      add :condition, :string, null: false, comment: ">, <, ==, !=, >=, <="
-      add :threshold, :float, null: false
-      add :duration_seconds, :integer, default: 60, comment: "How long condition must be true"
-      add :label_matchers, :jsonb, default: "{}", comment: "Label filters"
-      add :description, :text
-      add :summary, :text
-      add :runbook_url, :string, comment: "Link to runbook/docs"
-      add :notification_channels, {:array, :string}, default: ["email"]
-      add :evaluation_interval_seconds, :integer, default: 60
-      add :last_evaluated_at, :utc_datetime_usec
-      add :last_state, :alert_state
-      add :created_by, :uuid
-      add :team, :string
-      add :priority, :integer, default: 0
+      add(:id, :uuid, primary_key: true)
+      add(:name, :string, null: false)
+      add(:severity, :alert_severity, null: false)
+      add(:enabled, :boolean, default: true)
+      add(:metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all))
+      add(:query, :text, null: false, comment: "PromQL-style query")
+      add(:condition, :string, null: false, comment: ">, <, ==, !=, >=, <=")
+      add(:threshold, :float, null: false)
+      add(:duration_seconds, :integer, default: 60, comment: "How long condition must be true")
+      add(:label_matchers, :jsonb, default: "{}", comment: "Label filters")
+      add(:description, :text)
+      add(:summary, :text)
+      add(:runbook_url, :string, comment: "Link to runbook/docs")
+      add(:notification_channels, {:array, :string}, default: ["email"])
+      add(:evaluation_interval_seconds, :integer, default: 60)
+      add(:last_evaluated_at, :utc_datetime_usec)
+      add(:last_state, :alert_state)
+      add(:created_by, :uuid)
+      add(:team, :string)
+      add(:priority, :integer, default: 0)
       timestamps(type: :utc_datetime_usec)
     end
-    create unique_index(:alert_rules, [:name])
-    create index(:alert_rules, [:enabled])
-    create index(:alert_rules, [:severity])
-    create index(:alert_rules, [:metric_id])
-    create index(:alert_rules, [:team])
+
+    create(unique_index(:alert_rules, [:name]))
+    create(index(:alert_rules, [:enabled]))
+    create(index(:alert_rules, [:severity]))
+    create(index(:alert_rules, [:metric_id]))
+    create(index(:alert_rules, [:team]))
+
     create table(:alert_instances) do
-      add :id, :uuid, primary_key: true
-      add :alert_rule_id, references(:alert_rules, type: :uuid, on_delete: :delete_all),
+      add(:id, :uuid, primary_key: true)
+
+      add(:alert_rule_id, references(:alert_rules, type: :uuid, on_delete: :delete_all),
         null: false
-      add :state, :alert_state, null: false, default: "pending"
-      add :severity, :alert_severity, null: false
-      add :started_at, :utc_datetime_usec, null: false
-      add :resolved_at, :utc_datetime_usec
-      add :silenced_until, :utc_datetime_usec
-      add :labels, :jsonb, default: "{}", comment: "Labels that triggered this alert"
-      add :current_value, :float, comment: "Current metric value"
-      add :threshold, :float, comment: "Threshold that was crossed"
-      add :description, :text
-      add :summary, :text
-      add :runbook_url, :string
-      add :acknowledged_at, :utc_datetime_usec
-      add :acknowledged_by, :uuid
-      add :notified_at, :utc_datetime_usec
-      add :notification_count, :integer, default: 0
-      add :notification_channels, {:array, :string}, default: []
+      )
+
+      add(:state, :alert_state, null: false, default: "pending")
+      add(:severity, :alert_severity, null: false)
+      add(:started_at, :utc_datetime_usec, null: false)
+      add(:resolved_at, :utc_datetime_usec)
+      add(:silenced_until, :utc_datetime_usec)
+      add(:labels, :jsonb, default: "{}", comment: "Labels that triggered this alert")
+      add(:current_value, :float, comment: "Current metric value")
+      add(:threshold, :float, comment: "Threshold that was crossed")
+      add(:description, :text)
+      add(:summary, :text)
+      add(:runbook_url, :string)
+      add(:acknowledged_at, :utc_datetime_usec)
+      add(:acknowledged_by, :uuid)
+      add(:notified_at, :utc_datetime_usec)
+      add(:notification_count, :integer, default: 0)
+      add(:notification_channels, {:array, :string}, default: [])
       timestamps(type: :utc_datetime_usec)
     end
-    create index(:alert_instances, [:alert_rule_id])
-    create index(:alert_instances, [:state])
-    create index(:alert_instances, [:started_at])
-    create index(:alert_instances, [:severity])
+
+    create(index(:alert_instances, [:alert_rule_id]))
+    create(index(:alert_instances, [:state]))
+    create(index(:alert_instances, [:started_at]))
+    create(index(:alert_instances, [:severity]))
     execute("CREATE INDEX alert_instances_labels_gin ON alert_instances USING GIN (labels)")
+
     create table(:sla_definitions) do
-      add :id, :uuid, primary_key: true
-      add :name, :string, null: false
-      add :description, :text
-      add :metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all)
-      add :target_value, :float, null: false, comment: "SLA target (e.g., 99.9 for uptime)"
-      add :comparison, :string, null: false, comment: ">=, <=, ==, etc."
-      add :window_days, :integer, default: 30, comment: "Rolling window in days"
-      add :error_budget_percent, :float, comment: "Allowed error percentage"
-      add :current_value, :float
-      add :status, :sla_status, default: "meeting"
-      add :last_violation_at, :utc_datetime_usec
-      add :violation_count, :integer, default: 0
-      add :service, :string, null: false
-      add :team, :string
-      add :enabled, :boolean, default: true
+      add(:id, :uuid, primary_key: true)
+      add(:name, :string, null: false)
+      add(:description, :text)
+      add(:metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all))
+      add(:target_value, :float, null: false, comment: "SLA target (e.g., 99.9 for uptime)")
+      add(:comparison, :string, null: false, comment: ">=, <=, ==, etc.")
+      add(:window_days, :integer, default: 30, comment: "Rolling window in days")
+      add(:error_budget_percent, :float, comment: "Allowed error percentage")
+      add(:current_value, :float)
+      add(:status, :sla_status, default: "meeting")
+      add(:last_violation_at, :utc_datetime_usec)
+      add(:violation_count, :integer, default: 0)
+      add(:service, :string, null: false)
+      add(:team, :string)
+      add(:enabled, :boolean, default: true)
       timestamps(type: :utc_datetime_usec)
     end
-    create unique_index(:sla_definitions, [:name])
-    create index(:sla_definitions, [:service])
-    create index(:sla_definitions, [:status])
-    create index(:sla_definitions, [:enabled])
+
+    create(unique_index(:sla_definitions, [:name]))
+    create(index(:sla_definitions, [:service]))
+    create(index(:sla_definitions, [:status]))
+    create(index(:sla_definitions, [:enabled]))
+
     create table(:sla_violations) do
-      add :id, :uuid, primary_key: true
-      add :sla_id, references(:sla_definitions, type: :uuid, on_delete: :delete_all), null: false
-      add :started_at, :utc_datetime_usec, null: false
-      add :ended_at, :utc_datetime_usec
-      add :duration_seconds, :integer
-      add :target_value, :float
-      add :actual_value, :float
-      add :deviation_percent, :float
-      add :error_budget_consumed, :float, comment: "Percentage of error budget consumed"
-      add :description, :text
-      add :root_cause, :text
-      add :remediation, :text
+      add(:id, :uuid, primary_key: true)
+      add(:sla_id, references(:sla_definitions, type: :uuid, on_delete: :delete_all), null: false)
+      add(:started_at, :utc_datetime_usec, null: false)
+      add(:ended_at, :utc_datetime_usec)
+      add(:duration_seconds, :integer)
+      add(:target_value, :float)
+      add(:actual_value, :float)
+      add(:deviation_percent, :float)
+      add(:error_budget_consumed, :float, comment: "Percentage of error budget consumed")
+      add(:description, :text)
+      add(:root_cause, :text)
+      add(:remediation, :text)
       timestamps(type: :utc_datetime_usec)
     end
-    create index(:sla_violations, [:sla_id])
-    create index(:sla_violations, [:started_at])
+
+    create(index(:sla_violations, [:sla_id]))
+    create(index(:sla_violations, [:started_at]))
+
     create table(:dashboards) do
-      add :id, :uuid, primary_key: true
-      add :name, :string, null: false
-      add :description, :text
-      add :layout, :jsonb, default: "{}", comment: "Grid layout configuration"
-      add :refresh_interval_seconds, :integer, default: 30
-      add :is_public, :boolean, default: false
-      add :team, :string
-      add :created_by, :uuid
-      add :tags, {:array, :string}, default: []
-      add :starred, :boolean, default: false
-      add :view_count, :integer, default: 0
+      add(:id, :uuid, primary_key: true)
+      add(:name, :string, null: false)
+      add(:description, :text)
+      add(:layout, :jsonb, default: "{}", comment: "Grid layout configuration")
+      add(:refresh_interval_seconds, :integer, default: 30)
+      add(:is_public, :boolean, default: false)
+      add(:team, :string)
+      add(:created_by, :uuid)
+      add(:tags, {:array, :string}, default: [])
+      add(:starred, :boolean, default: false)
+      add(:view_count, :integer, default: 0)
       timestamps(type: :utc_datetime_usec)
     end
-    create unique_index(:dashboards, [:name])
-    create index(:dashboards, [:team])
-    create index(:dashboards, [:starred])
+
+    create(unique_index(:dashboards, [:name]))
+    create(index(:dashboards, [:team]))
+    create(index(:dashboards, [:starred]))
     execute("CREATE INDEX dashboards_tags_gin ON dashboards USING GIN (tags)")
+
     create table(:dashboard_panels) do
-      add :id, :uuid, primary_key: true
-      add :dashboard_id, references(:dashboards, type: :uuid, on_delete: :delete_all), null: false
-      add :title, :string, null: false
-      add :description, :text
-      add :panel_type, :string,
+      add(:id, :uuid, primary_key: true)
+
+      add(:dashboard_id, references(:dashboards, type: :uuid, on_delete: :delete_all),
+        null: false
+      )
+
+      add(:title, :string, null: false)
+      add(:description, :text)
+
+      add(:panel_type, :string,
         null: false,
         comment: "graph, stat, table, heatmap, gauge, pie"
-      add :query, :text, null: false, comment: "Metric query (PromQL-style)"
-      add :visualization_config, :jsonb, default: "{}", comment: "Chart-specific config"
-      add :grid_x, :integer, default: 0
-      add :grid_y, :integer, default: 0
-      add :grid_width, :integer, default: 12
-      add :grid_height, :integer, default: 8
-      add :time_range_from, :string, default: "now-1h"
-      add :time_range_to, :string, default: "now"
-      add :legend_enabled, :boolean, default: true
-      add :threshold_lines, :jsonb, comment: "Warning/critical thresholds"
+      )
+
+      add(:query, :text, null: false, comment: "Metric query (PromQL-style)")
+      add(:visualization_config, :jsonb, default: "{}", comment: "Chart-specific config")
+      add(:grid_x, :integer, default: 0)
+      add(:grid_y, :integer, default: 0)
+      add(:grid_width, :integer, default: 12)
+      add(:grid_height, :integer, default: 8)
+      add(:time_range_from, :string, default: "now-1h")
+      add(:time_range_to, :string, default: "now")
+      add(:legend_enabled, :boolean, default: true)
+      add(:threshold_lines, :jsonb, comment: "Warning/critical thresholds")
       timestamps(type: :utc_datetime_usec)
     end
-    create index(:dashboard_panels, [:dashboard_id])
+
+    create(index(:dashboard_panels, [:dashboard_id]))
+
     create table(:anomaly_models) do
-      add :id, :uuid, primary_key: true
-      add :metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
+      add(:id, :uuid, primary_key: true)
+
+      add(:metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
         null: false
-      add :name, :string, null: false
-      add :algorithm, :string, null: false, comment: "zscore, isolation_forest, prophet, etc."
-      add :parameters, :jsonb, default: "{}"
-      add :sensitivity, :float, default: 0.95, comment: "Detection sensitivity (0-1)"
-      add :training_data_days, :integer, default: 14
-      add :last_trained_at, :utc_datetime_usec
-      add :model_accuracy, :float, comment: "Model accuracy score"
-      add :enabled, :boolean, default: true
-      add :model_data, :bytea, comment: "Serialized model"
+      )
+
+      add(:name, :string, null: false)
+      add(:algorithm, :string, null: false, comment: "zscore, isolation_forest, prophet, etc.")
+      add(:parameters, :jsonb, default: "{}")
+      add(:sensitivity, :float, default: 0.95, comment: "Detection sensitivity (0-1)")
+      add(:training_data_days, :integer, default: 14)
+      add(:last_trained_at, :utc_datetime_usec)
+      add(:model_accuracy, :float, comment: "Model accuracy score")
+      add(:enabled, :boolean, default: true)
+      add(:model_data, :bytea, comment: "Serialized model")
       timestamps(type: :utc_datetime_usec)
     end
-    create unique_index(:anomaly_models, [:metric_id, :name])
-    create index(:anomaly_models, [:enabled])
+
+    create(unique_index(:anomaly_models, [:metric_id, :name]))
+    create(index(:anomaly_models, [:enabled]))
+
     create table(:anomalies) do
-      add :id, :uuid, primary_key: true
-      add :model_id, references(:anomaly_models, type: :uuid, on_delete: :delete_all), null: false
-      add :metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
+      add(:id, :uuid, primary_key: true)
+
+      add(:model_id, references(:anomaly_models, type: :uuid, on_delete: :delete_all),
         null: false
-      add :detected_at, :utc_datetime_usec, null: false
-      add :ended_at, :utc_datetime_usec
-      add :severity, :alert_severity, default: "warning"
-      add :anomaly_score, :float, null: false, comment: "How anomalous (0-1)"
-      add :expected_value, :float
-      add :actual_value, :float
-      add :deviation_percent, :float
-      add :labels, :jsonb, default: "{}"
-      add :description, :text
-      add :is_false_positive, :boolean, default: false
-      add :investigated_at, :utc_datetime_usec
-      add :investigated_by, :uuid
-      add :root_cause, :text
+      )
+
+      add(:metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
+        null: false
+      )
+
+      add(:detected_at, :utc_datetime_usec, null: false)
+      add(:ended_at, :utc_datetime_usec)
+      add(:severity, :alert_severity, default: "warning")
+      add(:anomaly_score, :float, null: false, comment: "How anomalous (0-1)")
+      add(:expected_value, :float)
+      add(:actual_value, :float)
+      add(:deviation_percent, :float)
+      add(:labels, :jsonb, default: "{}")
+      add(:description, :text)
+      add(:is_false_positive, :boolean, default: false)
+      add(:investigated_at, :utc_datetime_usec)
+      add(:investigated_by, :uuid)
+      add(:root_cause, :text)
       timestamps(type: :utc_datetime_usec)
     end
-    create index(:anomalies, [:model_id])
-    create index(:anomalies, [:metric_id])
-    create index(:anomalies, [:detected_at])
-    create index(:anomalies, [:severity])
-    create index(:anomalies, [:is_false_positive])
+
+    create(index(:anomalies, [:model_id]))
+    create(index(:anomalies, [:metric_id]))
+    create(index(:anomalies, [:detected_at]))
+    create(index(:anomalies, [:severity]))
+    create(index(:anomalies, [:is_false_positive]))
+
     create table(:traces) do
-      add :id, :uuid, primary_key: true
-      add :trace_id, :string, null: false, comment: "Distributed trace ID"
-      add :started_at, :utc_datetime_usec, null: false
-      add :duration_ms, :float
-      add :service, :string, null: false
-      add :operation, :string, null: false
-      add :status, :string, comment: "ok, error, timeout"
-      add :error_message, :text
-      add :span_count, :integer, default: 0
-      add :tags, :jsonb, default: "{}"
+      add(:id, :uuid, primary_key: true)
+      add(:trace_id, :string, null: false, comment: "Distributed trace ID")
+      add(:started_at, :utc_datetime_usec, null: false)
+      add(:duration_ms, :float)
+      add(:service, :string, null: false)
+      add(:operation, :string, null: false)
+      add(:status, :string, comment: "ok, error, timeout")
+      add(:error_message, :text)
+      add(:span_count, :integer, default: 0)
+      add(:tags, :jsonb, default: "{}")
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
-    create unique_index(:traces, [:trace_id])
-    create index(:traces, [:service])
-    create index(:traces, [:started_at])
-    create index(:traces, [:status])
+
+    create(unique_index(:traces, [:trace_id]))
+    create(index(:traces, [:service]))
+    create(index(:traces, [:started_at]))
+    create(index(:traces, [:status]))
     execute("CREATE INDEX traces_tags_gin ON traces USING GIN (tags)")
+
     create table(:spans) do
-      add :id, :uuid, primary_key: true
-      add :trace_id, references(:traces, type: :uuid, on_delete: :delete_all), null: false
-      add :span_id, :string, null: false
-      add :parent_span_id, :string
-      add :service, :string, null: false
-      add :operation, :string, null: false
-      add :started_at, :utc_datetime_usec, null: false
-      add :duration_ms, :float, null: false
-      add :tags, :jsonb, default: "{}"
-      add :logs, :jsonb, default: "[]", comment: "Structured log entries"
-      add :status, :string
-      add :error, :boolean, default: false
+      add(:id, :uuid, primary_key: true)
+      add(:trace_id, references(:traces, type: :uuid, on_delete: :delete_all), null: false)
+      add(:span_id, :string, null: false)
+      add(:parent_span_id, :string)
+      add(:service, :string, null: false)
+      add(:operation, :string, null: false)
+      add(:started_at, :utc_datetime_usec, null: false)
+      add(:duration_ms, :float, null: false)
+      add(:tags, :jsonb, default: "{}")
+      add(:logs, :jsonb, default: "[]", comment: "Structured log entries")
+      add(:status, :string)
+      add(:error, :boolean, default: false)
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
-    create index(:spans, [:trace_id])
-    create index(:spans, [:span_id])
-    create index(:spans, [:service])
-    create index(:spans, [:started_at])
+
+    create(index(:spans, [:trace_id]))
+    create(index(:spans, [:span_id]))
+    create(index(:spans, [:service]))
+    create(index(:spans, [:started_at]))
     execute("CREATE INDEX spans_tags_gin ON spans USING GIN (tags)")
+
     execute("""
     CREATE MATERIALIZED VIEW mv_metrics_realtime AS
     SELECT
@@ -402,8 +465,10 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     WHERE s.timestamp >= NOW() - INTERVAL '5 minutes'
     GROUP BY m.name, m.namespace, m.subsystem, m.type, s.labels, s.region
     """)
-    create index(:mv_metrics_realtime, [:name])
-    create index(:mv_metrics_realtime, [:namespace, :subsystem])
+
+    create(index(:mv_metrics_realtime, [:name]))
+    create(index(:mv_metrics_realtime, [:namespace, :subsystem]))
+
     execute("""
     CREATE MATERIALIZED VIEW mv_sla_compliance AS
     SELECT
@@ -424,8 +489,10 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     WHERE s.enabled = true
     GROUP BY s.id, s.name, s.service, s.team, s.status, s.current_value, s.target_value, s.error_budget_percent
     """)
-    create index(:mv_sla_compliance, [:service])
-    create index(:mv_sla_compliance, [:status])
+
+    create(index(:mv_sla_compliance, [:service]))
+    create(index(:mv_sla_compliance, [:status]))
+
     execute("""
     CREATE MATERIALIZED VIEW mv_active_alerts AS
     SELECT
@@ -443,8 +510,10 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     WHERE r.enabled = true
     GROUP BY r.id, r.name, r.severity, r.team
     """)
-    create index(:mv_active_alerts, [:severity])
-    create index(:mv_active_alerts, [:team])
+
+    create(index(:mv_active_alerts, [:severity]))
+    create(index(:mv_active_alerts, [:team]))
+
     execute("""
     CREATE OR REPLACE FUNCTION calculate_sla_compliance(
       p_sla_id UUID,
@@ -497,6 +566,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     END;
     $$ LANGUAGE plpgsql;
     """)
+
     execute("""
     CREATE OR REPLACE FUNCTION refresh_metrics_views()
     RETURNS void AS $$
@@ -507,6 +577,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     END;
     $$ LANGUAGE plpgsql;
     """)
+
     execute("""
     CREATE OR REPLACE FUNCTION evaluate_alert_rule(p_rule_id UUID)
     RETURNS TABLE (
@@ -546,6 +617,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     END;
     $$ LANGUAGE plpgsql;
     """)
+
     execute("""
     CREATE OR REPLACE FUNCTION update_metric_cardinality()
     RETURNS TRIGGER AS $$
@@ -561,12 +633,14 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     END;
     $$ LANGUAGE plpgsql;
     """)
+
     execute("""
     CREATE TRIGGER trg_update_cardinality
     AFTER INSERT ON metric_samples
     FOR EACH ROW
     EXECUTE FUNCTION update_metric_cardinality()
     """)
+
     execute("""
     CREATE MATERIALIZED VIEW metric_aggregates_1m
     WITH (timescaledb.continuous) AS
@@ -591,6 +665,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     FROM metric_samples
     GROUP BY metric_id, time_bucket('1 minute', timestamp), labels, labels_hash, machine_id, region
     """)
+
     execute("""
     SELECT add_continuous_aggregate_policy(
       'metric_aggregates_1m',
@@ -601,6 +676,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     )
     """)
   end
+
   def down do
     execute("DROP MATERIALIZED VIEW IF EXISTS metric_aggregates_1m CASCADE")
     execute("DROP MATERIALIZED VIEW IF EXISTS mv_active_alerts CASCADE")
@@ -610,19 +686,19 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     execute("DROP FUNCTION IF EXISTS refresh_metrics_views CASCADE")
     execute("DROP FUNCTION IF EXISTS calculate_sla_compliance CASCADE")
     execute("DROP FUNCTION IF EXISTS update_metric_cardinality CASCADE")
-    drop table(:spans)
-    drop table(:traces)
-    drop table(:anomalies)
-    drop table(:anomaly_models)
-    drop table(:dashboard_panels)
-    drop table(:dashboards)
-    drop table(:sla_violations)
-    drop table(:sla_definitions)
-    drop table(:alert_instances)
-    drop table(:alert_rules)
-    drop table(:metric_aggregates)
-    drop table(:metric_samples)
-    drop table(:metric_definitions)
+    drop(table(:spans))
+    drop(table(:traces))
+    drop(table(:anomalies))
+    drop(table(:anomaly_models))
+    drop(table(:dashboard_panels))
+    drop(table(:dashboards))
+    drop(table(:sla_violations))
+    drop(table(:sla_definitions))
+    drop(table(:alert_instances))
+    drop(table(:alert_rules))
+    drop(table(:metric_aggregates))
+    drop(table(:metric_samples))
+    drop(table(:metric_definitions))
     execute("DROP TYPE IF EXISTS sla_status")
     execute("DROP TYPE IF EXISTS aggregation_function")
     execute("DROP TYPE IF EXISTS alert_state")

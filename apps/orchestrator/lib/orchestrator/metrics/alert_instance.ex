@@ -34,7 +34,6 @@ defmodule Orchestrator.Metrics.AlertInstance do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc false
   def changeset(instance, attrs) do
     instance
     |> cast(attrs, [

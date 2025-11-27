@@ -1,7 +1,6 @@
 defmodule OrchestratorWeb.DebuggerSocket do
   use Phoenix.Socket
   require Logger
-  alias Orchestrator.Debugger.Session
   channel("debug:*", OrchestratorWeb.DebuggerChannel)
   @impl true
   def connect(%{"token" => token} = params, socket, _connect_info) do
@@ -21,7 +20,7 @@ defmodule OrchestratorWeb.DebuggerSocket do
         {:ok, socket}
 
       {:error, reason} ->
-        Logger.warn("Debugger WebSocket connection rejected",
+        Logger.warning("Debugger WebSocket connection rejected",
           reason: inspect(reason)
         )
 

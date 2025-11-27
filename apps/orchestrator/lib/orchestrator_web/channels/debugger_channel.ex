@@ -1,7 +1,7 @@
 defmodule OrchestratorWeb.DebuggerChannel do
   use OrchestratorWeb, :channel
   require Logger
-  alias Orchestrator.Debugger.{Session, PTY, ProcessInspector, NetworkCapture, FSBrowser}
+  alias Orchestrator.Debugger.{Session, ProcessInspector, FSBrowser}
   alias Orchestrator.MachineFSM
   @impl true
   def join("debug:" <> machine_id, params, socket) do
@@ -37,9 +37,6 @@ defmodule OrchestratorWeb.DebuggerChannel do
           {:error, reason} ->
             {:error, %{reason: inspect(reason)}}
         end
-
-      {:error, reason} ->
-        {:error, %{reason: inspect(reason)}}
     end
   end
 
@@ -153,14 +150,7 @@ defmodule OrchestratorWeb.DebuggerChannel do
   end
 
   @impl true
-  def handle_in("fs.list", %{"path" => path} = params, socket) do
-    opts = [
-      recursive: Map.get(params, "recursive", false),
-      max_depth: Map.get(params, "max_depth", 1),
-      include_hidden: Map.get(params, "include_hidden", false),
-      sort_by: Map.get(params, "sort_by", "name") |> String.to_atom()
-    ]
-
+  def handle_in("fs.list", %{"path" => path}, socket) do
     case Session.list_files(socket.assigns.session_id, path) do
       {:ok, files} ->
         {:reply, {:ok, %{files: files}}, socket}
@@ -171,12 +161,7 @@ defmodule OrchestratorWeb.DebuggerChannel do
   end
 
   @impl true
-  def handle_in("fs.read", %{"path" => path} = params, socket) do
-    opts = [
-      max_size: Map.get(params, "max_size", 10 * 1024 * 1024),
-      encoding: Map.get(params, "encoding", "auto") |> String.to_atom()
-    ]
-
+  def handle_in("fs.read", %{"path" => path}, socket) do
     case Session.read_file(socket.assigns.session_id, path) do
       {:ok, content} ->
         {:reply, {:ok, %{content: content}}, socket}
@@ -283,7 +268,7 @@ defmodule OrchestratorWeb.DebuggerChannel do
 
   @impl true
   def handle_in(event, params, socket) do
-    Logger.warn("Unknown debugger event",
+    Logger.warning("Unknown debugger event",
       event: event,
       params: inspect(params),
       session_id: socket.assigns.session_id

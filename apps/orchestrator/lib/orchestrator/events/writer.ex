@@ -3,7 +3,6 @@ defmodule Orchestrator.Events.Writer do
   require Logger
   alias Orchestrator.Events.Event
   alias Orchestrator.Repo
-  import Ecto.Query
 
   @type event_attrs :: %{
           required(:aggregate_id) => binary(),
@@ -24,15 +23,15 @@ defmodule Orchestrator.Events.Writer do
   @default_flush_interval 50
   @default_max_retries 3
   @default_retry_backoff 100
+
   defmodule State do
-    @moduledoc false
     defstruct buffer: [],
               buffer_size: 0,
-              batch_size: @default_batch_size,
-              flush_interval: @default_flush_interval,
+              batch_size: 100,
+              flush_interval: 50,
               flush_timer: nil,
-              max_retries: @default_max_retries,
-              retry_backoff: @default_retry_backoff,
+              max_retries: 3,
+              retry_backoff: 100,
               pending_responses: %{},
               metrics: %{
                 total_events: 0,
@@ -63,6 +62,19 @@ defmodule Orchestrator.Events.Writer do
     GenServer.call(__MODULE__, {:append_batch, events}, timeout)
   end
 
+  @spec append_event(binary(), atom(), map(), map()) :: :ok
+  def append_event(aggregate_id, event_type, data, metadata \\ %{}) do
+    attrs = %{
+      aggregate_id: aggregate_id,
+      aggregate_type: infer_aggregate_type(event_type),
+      event_type: event_type,
+      data: data,
+      metadata: metadata
+    }
+
+    append(attrs)
+  end
+
   @spec flush(timeout()) :: :ok
   def flush(timeout \\ 5000) do
     GenServer.call(__MODULE__, :flush, timeout)
@@ -71,6 +83,18 @@ defmodule Orchestrator.Events.Writer do
   @spec metrics() :: map()
   def metrics do
     GenServer.call(__MODULE__, :metrics)
+  end
+
+  defp infer_aggregate_type(event_type) do
+    event_str = Atom.to_string(event_type)
+
+    cond do
+      String.starts_with?(event_str, "machine_") -> "machine"
+      String.starts_with?(event_str, "placement_") -> "placement"
+      String.starts_with?(event_str, "migration_") -> "migration"
+      String.starts_with?(event_str, "deployment_") -> "deployment"
+      true -> "system"
+    end
   end
 
   @impl true
@@ -105,10 +129,16 @@ defmodule Orchestrator.Events.Writer do
 
     case persist_event(event) do
       {:ok, persisted_event} ->
+        Logger.debug("Event persisted synchronously", event_id: persisted_event.id, caller: from)
         {:reply, {:ok, persisted_event}, state}
 
       {:error, reason} = error ->
-        Logger.error("Failed to persist event synchronously", event_id: event.id, error: reason)
+        Logger.error("Failed to persist event synchronously",
+          event_id: event.id,
+          error: reason,
+          caller: from
+        )
+
         {:reply, error, state}
     end
   end
@@ -117,22 +147,25 @@ defmodule Orchestrator.Events.Writer do
   def handle_call({:append_batch, event_attrs_list}, from, state) do
     case persist_batch(event_attrs_list, state) do
       {:ok, events} ->
+        Logger.debug("Event batch persisted", count: length(events), caller: from)
         {:reply, {:ok, events}, update_metrics(state, length(events))}
 
       {:error, reason} = error ->
-        Logger.error("Failed to persist event batch", error: reason)
+        Logger.error("Failed to persist event batch", error: reason, caller: from)
         {:reply, error, state}
     end
   end
 
   @impl true
   def handle_call(:flush, from, state) do
+    Logger.debug("Manual flush requested", caller: from)
     state = flush_buffer(state)
     {:reply, :ok, state}
   end
 
   @impl true
   def handle_call(:metrics, from, state) do
+    Logger.debug("Metrics requested", caller: from)
     {:reply, state.metrics, state}
   end
 
@@ -170,7 +203,8 @@ defmodule Orchestrator.Events.Writer do
     %{
       node: node() |> Atom.to_string(),
       timestamp: System.system_time(:millisecond),
-      sequence: :erlang.unique_integer([:positive, :monotonic])
+      sequence: :erlang.unique_integer([:positive, :monotonic]),
+      correlation_id: attrs[:correlation_id]
     }
   end
 
@@ -240,8 +274,9 @@ defmodule Orchestrator.Events.Writer do
     events =
       event_attrs_list
       |> Enum.with_index()
-      |> Enum.map(fn {attrs, index} ->
-        build_event(attrs, state)
+      |> Enum.map(fn {attrs, _index} ->
+        event = build_event(attrs, state)
+        event
       end)
 
     Repo.transaction(fn ->

@@ -1,6 +1,7 @@
 defmodule OrchestratorWeb.OverrideController do
   use OrchestratorWeb, :controller
   alias Orchestrator.FeatureFlags
+  alias Orchestrator.Repo
 
   action_fallback(OrchestratorWeb.FallbackController)
 

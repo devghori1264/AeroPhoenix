@@ -1,7 +1,6 @@
 defmodule Orchestrator.RegionRegistry do
   use GenServer
   require Logger
-  alias Orchestrator.FlydClient
   @type region_code :: String.t()
   @type region_info :: %{
           code: region_code(),
@@ -26,6 +25,7 @@ defmodule Orchestrator.RegionRegistry do
   @health_check_interval :timer.seconds(30)
   @latency_check_interval :timer.minutes(5)
   @capacity_refresh_interval :timer.seconds(15)
+  @backoff_schedule [100, 200, 500, 1000, 2000, 5000, 10000]
   @regions [
     %{
       code: "us-east-1",
@@ -138,7 +138,15 @@ defmodule Orchestrator.RegionRegistry do
   end
 
   def handle_call({:get_region, code}, _from, state) do
-    case Map.get(state.regions, code) do
+    normalized_code =
+      case code do
+        "us-east" -> "us-east-1"
+        "eu-west" -> "eu-west-1"
+        "ap-south" -> "ap-south-1"
+        c -> c
+      end
+
+    case Map.get(state.regions, normalized_code) do
       nil -> {:reply, {:error, :not_found}, state}
       region -> {:reply, {:ok, region}, state}
     end
@@ -257,14 +265,22 @@ defmodule Orchestrator.RegionRegistry do
   end
 
   defp check_region_health(region) do
-    url = "#{region.endpoint}:#{region.http_port}/ping"
+    if Application.get_env(:orchestrator, :env) == :dev do
+      true
+    else
+      url = "#{region.endpoint}:#{region.http_port}/ping"
 
-    case Finch.build(:get, url) |> Finch.request(Orchestrator.Finch, receive_timeout: 3_000) do
-      {:ok, %{status: 200}} -> true
-      _ -> false
+      case Finch.build(:get, url) |> Finch.request(Orchestrator.Finch, receive_timeout: 3_000) do
+        {:ok, %{status: 200}} -> true
+        _ -> false
+      end
     end
   rescue
     _ -> false
+  end
+
+  def get_backoff(attempt) do
+    Enum.at(@backoff_schedule, attempt, List.last(@backoff_schedule))
   end
 
   defp refresh_capacity(state) do

@@ -8,8 +8,6 @@ defmodule OrchestratorWeb.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
-    plug(:fetch_live_flash)
-    plug(:put_root_layout, {OrchestratorWeb.LayoutView, :root})
     plug(:protect_from_forgery)
     plug(:put_secure_browser_headers)
   end
@@ -26,7 +24,6 @@ defmodule OrchestratorWeb.Router do
     post("/chaos/start", ChaosController, :start)
     post("/chaos/stop/:id", ChaosController, :stop)
 
-    # FSM Introspection and Visualization
     get("/fsm/graph", FSMController, :get_graph)
     get("/fsm/stats", FSMController, :get_stats)
     get("/fsm/:machine_id/state", FSMController, :get_state)
@@ -34,13 +31,11 @@ defmodule OrchestratorWeb.Router do
     get("/fsm/:machine_id/timeline", FSMController, :get_timeline)
     post("/fsm/:machine_id/health_check", FSMController, :trigger_health_check)
 
-    # Debug / Inspection APIs
     get("/debug/metrics/:id", DebugController, :metrics)
     get("/debug/threads/:id", DebugController, :threads)
     get("/debug/network/:id", DebugController, :network)
     get("/debug/fds/:id", DebugController, :file_descriptors)
 
-    # Event Sourcing / Replay APIs
     get("/events/aggregates", EventController, :list_aggregates)
     get("/events/search", EventController, :search)
     get("/events/correlation/:correlation_id", EventController, :trace)
@@ -48,7 +43,6 @@ defmodule OrchestratorWeb.Router do
     post("/events/:aggregate_id/rebuild", EventController, :rebuild)
     get("/events/:aggregate_id/diff", EventController, :diff)
 
-    # Placement Optimization APIs
     post("/placement/optimize", PlacementController, :optimize)
     get("/placement/evaluate/:machine_id", PlacementController, :evaluate)
     get("/placement/consolidations", PlacementController, :consolidations)
@@ -56,7 +50,6 @@ defmodule OrchestratorWeb.Router do
     get("/placement/cost", PlacementController, :cost_analysis)
     post("/placement/budget", PlacementController, :enforce_budget)
 
-    # Optimization Execution APIs (NEW - Step 8)
     post("/optimizations/cost", OptimizationController, :optimize_cost)
     post("/optimizations/latency", OptimizationController, :optimize_latency)
     post("/optimizations/combined", OptimizationController, :optimize_combined)
@@ -64,7 +57,6 @@ defmodule OrchestratorWeb.Router do
     post("/optimizations/execute", OptimizationController, :execute_placement)
     post("/optimizations/rollback/:execution_id", OptimizationController, :rollback_execution)
 
-    # Feature Flag APIs
     resources "/flags", FlagController, except: [:edit, :new] do
       post("/enable", FlagController, :enable)
       post("/disable", FlagController, :disable)
@@ -74,7 +66,6 @@ defmodule OrchestratorWeb.Router do
 
     post("/flags/evaluate_batch", FlagController, :evaluate_batch)
 
-    # Experiment APIs
     resources "/experiments", ExperimentController, except: [:edit, :new, :update] do
       post("/start", ExperimentController, :start)
       post("/pause", ExperimentController, :pause)
@@ -84,7 +75,6 @@ defmodule OrchestratorWeb.Router do
       post("/select_winner", ExperimentController, :select_winner)
     end
 
-    # Override APIs
     resources("/overrides", OverrideController, only: [:create, :show, :delete])
   end
 

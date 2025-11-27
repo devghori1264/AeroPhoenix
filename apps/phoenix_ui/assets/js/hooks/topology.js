@@ -1,4 +1,5 @@
 import * as d3 from "d3";
+import { ParticleSystem, HeatmapOverlay, RichTooltip, AnimationUtils } from './topology-enhancements.js';
 
 const TopologyHook = {
   mounted() {
@@ -10,6 +11,10 @@ const TopologyHook = {
     this.selectedNodeId = null;
     this.isDragging = false;
     this.regionPositions = new Map();
+
+    this.particleSystem = null;
+    this.heatmapOverlay = null;
+    this.richTooltip = null;
 
     const raw = this.el.dataset.topology;
     try {
@@ -29,6 +34,7 @@ const TopologyHook = {
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.setupTooltip();
     this.setupDefs();
+    this.initializeEnhancements();
     this.render(this.data);
 
     this.handleEvent("topology:update", (payload) => {
@@ -38,9 +44,9 @@ const TopologyHook = {
       const newRegions = (payload.regions && payload.regions.length > 0) ? payload.regions : this.data.regions;
       const newMachines = (payload.machines && payload.machines.length > 0) ? payload.machines : this.data.machines;
       const newChaos = payload.active_chaos !== undefined ? payload.active_chaos : this.data.active_chaos;
-      
+
       console.log('[TopologyHook] Using regions:', newRegions?.length, 'machines:', newMachines?.length, 'chaos:', newChaos?.length);
-      
+
       this.data = {
         regions: newRegions || [],
         machines: newMachines || [],
@@ -53,10 +59,10 @@ const TopologyHook = {
 
     this.resizeHandler = () => this.render(this.data);
     window.addEventListener('resize', this.resizeHandler);
-    
+
     console.log('[TopologyHook] Topology visualization mounted successfully');
   },
-  
+
   updated() {
     console.log('[TopologyHook] Component updated, re-reading data-topology attribute');
     const raw = this.el.dataset.topology;
@@ -81,9 +87,20 @@ const TopologyHook = {
       console.warn('[TopologyHook] Failed to parse updated topology data:', e);
     }
   },
-  
+
   destroyed() {
     console.log('[TopologyHook] Cleaning up topology visualization...');
+
+    if (this.particleSystem) {
+      this.particleSystem.stop();
+    }
+    if (this.heatmapOverlay) {
+      this.heatmapOverlay.hide();
+    }
+    if (this.richTooltip) {
+      this.richTooltip.hide();
+    }
+
     if (this.tooltip) {
       this.tooltip.remove();
     }
@@ -91,7 +108,7 @@ const TopologyHook = {
       window.removeEventListener('resize', this.resizeHandler);
     }
   },
-  
+
   setupTooltip() {
     let tooltip = document.querySelector('.topology-tooltip');
     if (!tooltip) {
@@ -101,11 +118,91 @@ const TopologyHook = {
     }
     this.tooltip = tooltip;
   },
-  
+
+  initializeEnhancements() {
+    console.log('[TopologyHook] Initializing enhancement systems...');
+
+    this.particleSystem = new ParticleSystem(this.svg);
+
+    this.heatmapOverlay = new HeatmapOverlay(this.svg);
+    this.heatmapOverlay.initialize();
+
+    this.richTooltip = new RichTooltip();
+
+    this.initializeZoomPan();
+
+    console.log('[TopologyHook] Enhancement systems initialized');
+  },
+
+  initializeZoomPan() {
+    let zoomGroup = this.svg.select('g.zoom-container');
+    if (zoomGroup.empty()) {
+      zoomGroup = this.svg.append('g').attr('class', 'zoom-container');
+    }
+    this.zoomGroup = zoomGroup;
+
+    const zoom = d3.zoom()
+      .scaleExtent([0.3, 3])
+      .on('zoom', (event) => {
+        if (!this.isDragging) {
+          this.zoomGroup.attr('transform', event.transform);
+        }
+      });
+
+    this.svg.call(zoom);
+
+    this.addZoomControls(zoom);
+
+    this.zoomBehavior = zoom;
+
+    console.log('[TopologyHook] Zoom/pan controls initialized');
+  },
+
+  addZoomControls(zoom) {
+    if (this.el.querySelector('.topology-zoom-controls')) return;
+
+    const controls = document.createElement('div');
+    controls.className = 'topology-zoom-controls glass';
+    controls.innerHTML = `
+      <button class="zoom-btn" data-action="zoom-in" title="Zoom In">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button class="zoom-btn" data-action="zoom-out" title="Zoom Out">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button class="zoom-btn" data-action="zoom-reset" title="Reset View">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="2" fill="none"/>
+        </svg>
+      </button>
+    `;
+
+    this.el.appendChild(controls);
+
+    controls.querySelector('[data-action="zoom-in"]').addEventListener('click', () => {
+      this.svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+    });
+
+    controls.querySelector('[data-action="zoom-out"]').addEventListener('click', () => {
+      this.svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+    });
+
+    controls.querySelector('[data-action="zoom-reset"]').addEventListener('click', () => {
+      this.svg.transition().duration(500).call(
+        zoom.transform,
+        d3.zoomIdentity
+      );
+    });
+  },
+
   setupDefs() {
 
     this.svg.selectAll("defs").remove();
-    
+
     const defs = this.svg.append("defs");
 
     const glowFilter = defs.append("filter")
@@ -114,12 +211,12 @@ const TopologyHook = {
       .attr("y", "-100%")
       .attr("width", "300%")
       .attr("height", "300%");
-    
+
     glowFilter.append("feGaussianBlur")
       .attr("in", "SourceGraphic")
       .attr("stdDeviation", 4)
       .attr("result", "blur");
-    
+
     const glowMerge = glowFilter.append("feMerge");
     glowMerge.append("feMergeNode").attr("in", "blur");
     glowMerge.append("feMergeNode").attr("in", "blur");
@@ -131,16 +228,16 @@ const TopologyHook = {
       .attr("y", "-50%")
       .attr("width", "200%")
       .attr("height", "200%");
-    
+
     shadowFilter.append("feGaussianBlur")
       .attr("in", "SourceAlpha")
       .attr("stdDeviation", 2.5);
-    
+
     shadowFilter.append("feOffset")
       .attr("dx", 0)
       .attr("dy", 2)
       .attr("result", "offsetblur");
-    
+
     const shadowMerge = shadowFilter.append("feMerge");
     shadowMerge.append("feMergeNode");
     shadowMerge.append("feMergeNode").attr("in", "SourceGraphic");
@@ -150,11 +247,11 @@ const TopologyHook = {
       .attr("cx", "50%")
       .attr("cy", "50%")
       .attr("r", "50%");
-    
+
     regionGradient.append("stop")
       .attr("offset", "0%")
       .attr("style", "stop-color:#8b5cf6;stop-opacity:1");
-    
+
     regionGradient.append("stop")
       .attr("offset", "100%")
       .attr("style", "stop-color:#6366f1;stop-opacity:1");
@@ -165,27 +262,27 @@ const TopologyHook = {
       .attr("y1", "0%")
       .attr("x2", "100%")
       .attr("y2", "0%");
-    
+
     lineGradient.append("stop")
       .attr("offset", "0%")
       .attr("style", "stop-color:#8b5cf6;stop-opacity:0.3");
-    
+
     lineGradient.append("stop")
       .attr("offset", "100%")
       .attr("style", "stop-color:#8b5cf6;stop-opacity:0.05");
   },
-  
+
   render(data) {
     const machines = data.machines || [];
     const regions = data.regions || [];
-    
+
     console.log(`[TopologyHook] Rendering ${machines.length} machines across ${regions.length} regions`);
-    
+
     if (machines.length === 0) {
       console.warn('[TopologyHook] No machines to render!');
       return;
     }
-    
+
     if (regions.length === 0) {
       console.warn('[TopologyHook] No regions to render!');
       return;
@@ -195,25 +292,35 @@ const TopologyHook = {
 
     const layout = this.computeLayout(machines, regions, width, height);
 
-    let regionLayer = this.svg.select("g.region-layer");
+    let regionLayer = this.zoomGroup.select("g.region-layer");
     if (regionLayer.empty()) {
-      regionLayer = this.svg.append("g").attr("class", "topology-layer region-layer");
+      regionLayer = this.zoomGroup.append("g").attr("class", "topology-layer region-layer");
     }
 
-    let connectionLayer = this.svg.select("g.connection-layer");
+    let connectionLayer = this.zoomGroup.select("g.connection-layer");
     if (connectionLayer.empty()) {
-      connectionLayer = this.svg.append("g").attr("class", "topology-layer connection-layer");
+      connectionLayer = this.zoomGroup.append("g").attr("class", "topology-layer connection-layer");
     }
 
-    let machineLayer = this.svg.select("g.machine-layer");
+    let machineLayer = this.zoomGroup.select("g.machine-layer");
     if (machineLayer.empty()) {
-      machineLayer = this.svg.append("g").attr("class", "topology-layer machine-layer");
+      machineLayer = this.zoomGroup.append("g").attr("class", "topology-layer machine-layer");
     }
     this.drawRegions(regionLayer, layout.regionCenters);
     this.drawMachines(machineLayer, layout.machines);
-    console.log('[TopologyHook] Render complete');
+
+    if (this.heatmapOverlay && layout.regionCenters.length > 1) {
+      this.heatmapOverlay.render(layout.regionCenters);
+      this.heatmapOverlay.show();
+    }
+
+    if (this.particleSystem && !this.reducedMotion) {
+      this.startParticleFlow(layout.machines, layout.regionCenters);
+    }
+
+    console.log('[TopologyHook] Render complete with enhancements');
   },
-  
+
   computeLayout(machines, regions, width, height) {
     const regionCount = regions.length || 1;
     const padding = 120;
@@ -303,13 +410,13 @@ const TopologyHook = {
         orbitIndex++;
       }
     });
-    
+
     return {
       regionCenters,
       machines: machinePositions
     };
   },
-  
+
   drawRegions(layer, regionCenters) {
     const self = this;
 
@@ -324,7 +431,7 @@ const TopologyHook = {
             .attr("opacity", 0)
             .style("cursor", "move");
 
-          g.each(function(d) {
+          g.each(function (d) {
             const regionKey = d.name || d.code || 'unknown';
             const regionMachines = machinesByRegion.get(regionKey) || [];
             const machineCount = regionMachines.length;
@@ -416,12 +523,12 @@ const TopologyHook = {
             .text(d => `${d.count || 0} nodes`);
 
           const drag = d3.drag()
-            .on("start", function(event, d) {
+            .on("start", function (event, d) {
               self.isDragging = true;
               d3.select(this).raise();
               d3.select(this).style("cursor", "grabbing");
             })
-            .on("drag", function(event, d) {
+            .on("drag", function (event, d) {
               const newX = event.x;
               const newY = event.y;
 
@@ -439,19 +546,28 @@ const TopologyHook = {
               const regionMachines = self.svg.selectAll(".machine-node")
                 .filter(m => (m.region || 'unknown') === regionKey);
 
-              regionMachines.each(function(m) {
+              regionMachines.each(function (m) {
                 m.cx += deltaX;
                 m.cy += deltaY;
                 m.regionCenter.cx = newX;
                 m.regionCenter.cy = newY;
                 d3.select(this).attr("transform", `translate(${m.cx}, ${m.cy})`);
 
+                const dx = newX - m.cx;
+                const dy = newY - m.cy;
+
                 d3.select(this).select(".connection-line")
-                  .attr("x2", newX - m.cx)
-                  .attr("y2", newY - m.cy);
+                  .attr("x2", dx)
+                  .attr("y2", dy);
+
+                const dr = Math.sqrt(dx * dx + dy * dy);
+                const controlX = dx * 0.5 + dy * 0.1;
+                const controlY = dy * 0.5 - dx * 0.1;
+                d3.select(this).select(".connection-curve")
+                  .attr("d", `M 0,0 Q ${controlX},${controlY} ${dx},${dy}`);
               });
             })
-            .on("end", function() {
+            .on("end", function () {
               self.isDragging = false;
               d3.select(this).style("cursor", "move");
             });
@@ -492,7 +608,7 @@ const TopologyHook = {
           return g;
         },
         update => {
-          update.each(function(d) {
+          update.each(function (d) {
             const regionKey = d.name || d.code || 'unknown';
             const regionMachines = machinesByRegion.get(regionKey) || [];
             const machineCount = regionMachines.length;
@@ -554,61 +670,83 @@ const TopologyHook = {
             .attr("opacity", 0)
             .style("cursor", "pointer");
 
-          g.append("line")
-            .attr("class", "connection-line")
-            .attr("x1", 0)
-            .attr("y1", 0)
-            .attr("x2", d => d.regionCenter.cx - d.cx)
-            .attr("y2", d => d.regionCenter.cy - d.cy)
-            .attr("stroke", "url(#connection-gradient)")
-            .attr("stroke-width", 1)
-            .attr("stroke-dasharray", "3,3")
-            .attr("opacity", 0.4);
+          g.each(function (d) {
+            const node = d3.select(this);
 
-          g.append("circle")
-            .attr("class", "machine-select-ring")
-            .attr("r", 14)
-            .attr("fill", "none")
-            .attr("stroke", d => self.getStatusColor(d.status))
-            .attr("stroke-width", 2)
-            .attr("opacity", 0);
+            node.append("line")
+              .attr("class", "connection-line")
+              .attr("x1", 0)
+              .attr("y1", 0)
+              .attr("x2", d => d.regionCenter.cx - d.cx)
+              .attr("y2", d => d.regionCenter.cy - d.cy)
+              .attr("stroke", "url(#connection-gradient)")
+              .attr("stroke-width", 1)
+              .attr("stroke-dasharray", "3,3")
+              .attr("opacity", 0.4);
 
-          g.append("circle")
-            .attr("class", "machine-main")
-            .attr("r", 10)
-            .attr("fill", d => self.getStatusColor(d.status))
-            .attr("stroke", "white")
-            .attr("stroke-width", 2.5)
-            .attr("filter", "url(#topology-shadow)");
+            node.append("path")
+              .attr("class", "connection-curve")
+              .attr("d", d => {
+                const dx = d.regionCenter.cx - d.cx;
+                const dy = d.regionCenter.cy - d.cy;
+                const controlX = dx * 0.5 + dy * 0.1;
+                const controlY = dy * 0.5 - dx * 0.1;
+                return `M 0,0 Q ${controlX},${controlY} ${dx},${dy}`;
+              })
+              .attr("fill", "none")
+              .attr("stroke", "rgba(139, 92, 246, 0.15)")
+              .attr("stroke-width", 2)
+              .attr("opacity", 0);
 
-          g.append("circle")
-            .attr("class", "status-pulse")
-            .attr("r", 3)
-            .attr("fill", "white")
-            .attr("opacity", 0.9);
+            node.append("circle")
+              .attr("class", "machine-select-ring")
+              .attr("r", 14)
+              .attr("fill", "none")
+              .attr("stroke", d => self.getStatusColor(d.status))
+              .attr("stroke-width", 2)
+              .attr("opacity", 0);
 
-          const labelGroup = g.append("g")
-            .attr("class", "machine-label")
-            .attr("transform", "translate(0, 22)");
+            node.append("circle")
+              .attr("class", "machine-main")
+              .attr("r", 10)
+              .attr("fill", d => self.getStatusColor(d.status))
+              .attr("stroke", "white")
+              .attr("stroke-width", 2.5)
+              .attr("filter", "url(#topology-shadow)");
 
-          const labelText = labelGroup.append("text")
-            .attr("text-anchor", "middle")
-            .attr("font-size", 10)
-            .attr("font-weight", 600)
-            .attr("fill", "var(--text)")
-            .text(d => (d.name || d.id).substring(0, 12));
+            node.append("circle")
+              .attr("class", "status-pulse")
+              .attr("r", 3)
+              .attr("fill", "white")
+              .attr("opacity", 0.9);
 
-          const bbox = labelText.node().getBBox();
-          labelGroup.insert("rect", "text")
-            .attr("x", bbox.x - 3)
-            .attr("y", bbox.y - 1)
-            .attr("width", bbox.width + 6)
-            .attr("height", bbox.height + 2)
-            .attr("rx", 3)
-            .attr("fill", "var(--surface)")
-            .attr("opacity", 0.9);
+            const labelGroup = node.append("g")
+              .attr("class", "machine-label")
+              .attr("transform", "translate(0, 22)");
 
-          g.each(function(d) {
+            const labelText = labelGroup.append("text")
+              .attr("text-anchor", "middle")
+              .attr("font-size", 10)
+              .attr("font-weight", 600)
+              .attr("fill", "var(--text)")
+              .text(d => (d.name || d.id).substring(0, 12));
+
+            try {
+              const bbox = labelText.node().getBBox();
+              labelGroup.insert("rect", "text")
+                .attr("x", bbox.x - 3)
+                .attr("y", bbox.y - 1)
+                .attr("width", bbox.width + 6)
+                .attr("height", bbox.height + 2)
+                .attr("rx", 3)
+                .attr("fill", "var(--surface)")
+                .attr("opacity", 0.9);
+            } catch (e) {
+              console.warn('[TopologyHook] Failed to calculate BBox for label:', e);
+            }
+          });
+
+          g.each(function (d) {
             try {
               const hasChaos = self.isMachineUnderChaos(d);
               console.log(`[TopologyHook] Machine ${d.id}: hasChaos=${hasChaos}, activeChaos.length=${self.activeChaos?.length || 0}`);
@@ -704,13 +842,17 @@ const TopologyHook = {
             g.attr("opacity", 1);
           }
 
-          g.on("click", function(event, d) {
+          g.on("click", function (event, d) {
             event.stopPropagation();
             self.handleMachineClick(d, this);
           });
 
-          g.on("mouseenter", function(event, d) {
-            self.showTooltip(d, event);
+          g.on("mouseenter", function (event, d) {
+            if (self.richTooltip) {
+              self.richTooltip.show(d, event.pageX, event.pageY);
+            } else {
+              self.showTooltip(d, event);
+            }
 
             if (!self.reducedMotion) {
               d3.select(this).select(".machine-main")
@@ -724,11 +866,20 @@ const TopologyHook = {
                 .duration(200)
                 .attr("opacity", 0.8)
                 .attr("stroke-width", 2);
+
+              d3.select(this).select(".connection-curve")
+                .transition()
+                .duration(300)
+                .attr("opacity", 0.6);
             }
           });
 
-          g.on("mouseleave", function(event, d) {
+          g.on("mouseleave", function (event, d) {
+            if (self.richTooltip) {
+              self.richTooltip.hide();
+            }
             self.hideTooltip();
+
             if (!self.reducedMotion) {
               d3.select(this).select(".machine-main")
                 .transition()
@@ -740,9 +891,14 @@ const TopologyHook = {
                 .duration(200)
                 .attr("opacity", 0.4)
                 .attr("stroke-width", 1);
+
+              d3.select(this).select(".connection-curve")
+                .transition()
+                .duration(200)
+                .attr("opacity", 0);
             }
           });
-          g.on("keydown", function(event, d) {
+          g.on("keydown", function (event, d) {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               self.handleMachineClick(d, this);
@@ -892,6 +1048,37 @@ const TopologyHook = {
     if (this.tooltip) {
       this.tooltip.classList.remove('visible');
     }
+  },
+
+  startParticleFlow(machines, regionCenters) {
+    if (!this.particleSystem) return;
+
+    this.particleSystem.start();
+
+    machines.forEach((machine, index) => {
+      const regionCenter = machine.regionCenter;
+      if (!regionCenter) return;
+
+      setTimeout(() => {
+        this.particleSystem.spawnParticles(machine, regionCenter, 3, machine.latency || 50);
+      }, index * 100);
+    });
+
+    if (this.particleInterval) {
+      clearInterval(this.particleInterval);
+    }
+
+    this.particleInterval = setInterval(() => {
+      const randomMachine = machines[Math.floor(Math.random() * machines.length)];
+      if (randomMachine && randomMachine.regionCenter) {
+        this.particleSystem.spawnParticles(
+          randomMachine,
+          randomMachine.regionCenter,
+          1,
+          randomMachine.latency || 50
+        );
+      }
+    }, 2000);
   }
 };
 

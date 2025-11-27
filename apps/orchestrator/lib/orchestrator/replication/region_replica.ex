@@ -4,7 +4,6 @@ defmodule Orchestrator.Replication.RegionReplica do
   @lag_check_interval 10_000
   @max_acceptable_lag 5_000
   defmodule State do
-    @moduledoc false
     defstruct [
       :region,
       :role,

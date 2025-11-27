@@ -73,7 +73,6 @@ defmodule Orchestrator.ChaosEngine do
       incident ->
         incident = Ecto.Changeset.change(incident, ended_at: now)
         {:ok, incident} = Repo.update(incident)
-        # Inform net-sim to heal
         Task.start(fn -> dispatch_to_net_sim_stop(incident) end)
         maybe_publish_nats(%{cmd: "stop", id: incident.id})
         new_active = Map.delete(state.active, incident.id)
@@ -126,14 +125,15 @@ defmodule Orchestrator.ChaosEngine do
   end
 
   defp maybe_publish_nats(payload) do
-    # Run NATS publishing in a separate task to prevent GenServer crashes
     Task.start(fn ->
       try do
         nats_url = Application.get_env(:orchestrator, :nats)[:url] || "nats://localhost:4222"
+        uri = URI.parse(nats_url)
+        opts = %{host: uri.host, port: uri.port || 4222}
 
-        case :gnat.start_link(%{host: nats_url}) do
+        case Gnat.start_link(opts) do
           {:ok, conn} ->
-            :gnat.pub(conn, @nats_topic, Jason.encode!(payload))
+            Gnat.pub(conn, @nats_topic, Jason.encode!(payload))
             GenServer.stop(conn)
 
           {:error, reason} ->

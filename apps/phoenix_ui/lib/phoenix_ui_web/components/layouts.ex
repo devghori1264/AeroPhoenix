@@ -1,13 +1,14 @@
 defmodule PhoenixUiWeb.Layouts do
   use PhoenixUiWeb, :html
-  embed_templates "layouts/*"
-  attr :flash, :map, required: true, doc: "the map of flash messages"
+  embed_templates("layouts/*")
+  attr(:flash, :map, required: true, doc: "the map of flash messages")
 
-  attr :current_scope, :map,
+  attr(:current_scope, :map,
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
+  )
 
-  slot :inner_block, required: true
+  slot(:inner_block, required: true)
 
   def app(assigns) do
     ~H"""
@@ -61,8 +62,8 @@ defmodule PhoenixUiWeb.Layouts do
     """
   end
 
-  attr :flash, :map, required: true, doc: "the map of flash messages"
-  attr :id, :string, default: "flash-group", doc: "the optional id of flash container"
+  attr(:flash, :map, required: true, doc: "the map of flash messages")
+  attr(:id, :string, default: "flash-group", doc: "the optional id of flash container")
 
   def flash_group(assigns) do
     ~H"""
@@ -99,19 +100,11 @@ defmodule PhoenixUiWeb.Layouts do
 
   def theme_toggle(assigns) do
     ~H"""
-    <div class="theme-switch-container">
-      <.icon name="hero-sun" class="theme-icon theme-icon-sun" />
-
-      <input
-        type="checkbox"
-        class="theme-switch-checkbox"
-        id="theme-checkbox"
-      />
-      <label class="theme-switch" for="theme-checkbox">
-        <span class="theme-switch-slider"></span>
+    <div class="flex items-center gap-2">
+      <label class="switch">
+        <input id="theme-checkbox" type="checkbox" />
+        <span class="slider"></span>
       </label>
-
-      <.icon name="hero-moon" class="theme-icon theme-icon-moon" />
     </div>
     """
   end

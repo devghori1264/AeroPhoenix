@@ -123,6 +123,25 @@ defmodule Orchestrator.Debugger.Session do
     GenServer.stop(via_tuple(session_id), :normal)
   end
 
+  @spec list_sessions() :: {:ok, [map()]} | {:error, term()}
+  def list_sessions do
+    sessions =
+      Registry.select(Orchestrator.DebuggerRegistry, [
+        {{:"$1", :"$2", :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}
+      ])
+      |> Enum.map(fn {session_id, pid, _value} ->
+        try do
+          Logger.debug("Querying session info", session_id: session_id)
+          GenServer.call(pid, :get_session_info, 100)
+        catch
+          :exit, _ -> nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    {:ok, sessions}
+  end
+
   @impl true
   def init(state) do
     {:ok, state, {:continue, :initialize}}
@@ -250,6 +269,21 @@ defmodule Orchestrator.Debugger.Session do
   end
 
   @impl true
+  def handle_call(:get_session_info, _from, state) do
+    info = %{
+      id: state.session_id,
+      machine_id: state.machine_id,
+      region: "local",
+      status: "active",
+      uptime: DateTime.diff(DateTime.utc_now(), state.created_at, :second),
+      connected: true,
+      created_at: state.created_at
+    }
+
+    {:reply, info, state}
+  end
+
+  @impl true
   def handle_call({:start_capture, opts}, _from, state) do
     case NetworkCapture.start(state.machine_id, opts) do
       {:ok, capture_pid} ->
@@ -296,22 +330,11 @@ defmodule Orchestrator.Debugger.Session do
 
   @impl true
   def handle_info(:update_metrics, state) do
-    case ProcessInspector.get_metrics(state.machine_id) do
-      {:ok, metrics} ->
-        new_state = %{state | metrics: metrics}
-        broadcast(new_state, {:metrics_updated, metrics})
-        schedule_metrics_update()
-        {:noreply, new_state}
-
-      {:error, reason} ->
-        Logger.warn("Failed to update metrics",
-          session_id: state.session_id,
-          reason: inspect(reason)
-        )
-
-        schedule_metrics_update()
-        {:noreply, state}
-    end
+    {:ok, metrics} = ProcessInspector.get_metrics(state.machine_id)
+    new_state = %{state | metrics: metrics}
+    broadcast(new_state, {:metrics_updated, metrics})
+    schedule_metrics_update()
+    {:noreply, new_state}
   end
 
   @impl true

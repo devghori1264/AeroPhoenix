@@ -36,4 +36,21 @@ defmodule Orchestrator.Scaling.ScalingEvent do
     ])
     |> validate_required([:service_name, :event_type, :trigger_reason])
   end
+
+  def create(attrs) do
+    %__MODULE__{}
+    |> changeset(attrs)
+    |> Orchestrator.Repo.insert()
+  end
+
+  def for_service(service_name, hours) do
+    import Ecto.Query
+    cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
+
+    from(e in __MODULE__,
+      where: e.service_name == ^service_name and e.inserted_at >= ^cutoff,
+      order_by: [desc: e.inserted_at]
+    )
+    |> Orchestrator.Repo.all()
+  end
 end

@@ -1,13 +1,11 @@
 defmodule Orchestrator.Replication.StateSync do
   use GenServer
   require Logger
-  alias Orchestrator.Replication.{CRDT, QuorumManager}
   @batch_size 100
   @sync_interval 1_000
   @max_retries 5
   @backoff_base 1_000
   defmodule State do
-    @moduledoc false
     defstruct [
       :source_region,
       :target_regions,
@@ -20,7 +18,6 @@ defmodule Orchestrator.Replication.StateSync do
   end
 
   defmodule Change do
-    @moduledoc false
     defstruct [:id, :key, :operation, :value, :timestamp, :vector_clock, :retry_count]
   end
 
@@ -72,7 +69,7 @@ defmodule Orchestrator.Replication.StateSync do
       operation: operation,
       value: value,
       timestamp: DateTime.utc_now(),
-      vector_clock: vector_clock || CRDT.VectorClock.new(),
+      vector_clock: vector_clock || %{},
       retry_count: 0
     }
 
@@ -233,13 +230,14 @@ defmodule Orchestrator.Replication.StateSync do
     end)
   end
 
-  defp encode_vector_clock(%CRDT.VectorClock{clocks: clocks}) do
-    clocks
+  defp encode_vector_clock(vector_clock) when is_map(vector_clock) do
+    vector_clock
   end
 
   defp encode_vector_clock(_), do: %{}
 
   defp simulate_network_transfer(compressed_changes, _target_region, _source_region) do
+    _size = byte_size(compressed_changes)
     :timer.sleep(:rand.uniform(50))
 
     if :rand.uniform(100) > 5 do

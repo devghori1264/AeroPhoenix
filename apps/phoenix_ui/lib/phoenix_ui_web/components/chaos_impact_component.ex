@@ -2,8 +2,8 @@ defmodule PhoenixUiWeb.ChaosImpactComponent do
   use Phoenix.Component
   import PhoenixUiWeb.CoreComponents
 
-  attr :active_chaos, :list, default: []
-  attr :class, :string, default: ""
+  attr(:active_chaos, :list, default: [])
+  attr(:class, :string, default: "")
 
   def render(assigns) do
     ~H"""

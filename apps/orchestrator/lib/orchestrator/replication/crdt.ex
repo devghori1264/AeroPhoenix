@@ -158,5 +158,9 @@ defmodule Orchestrator.Replication.CRDT do
     def get(vc, node_id) do
       Map.get(vc.clocks, node_id, 0)
     end
+
+    def to_map(vc) do
+      vc.clocks
+    end
   end
 end

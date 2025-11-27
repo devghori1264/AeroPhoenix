@@ -16,10 +16,12 @@ defmodule Orchestrator.PubSub do
     Task.start(fn ->
       try do
         nats_url = Application.get_env(:orchestrator, :nats)[:url] || "nats://localhost:4222"
+        uri = URI.parse(nats_url)
+        opts = %{host: uri.host, port: uri.port || 4222}
 
-        case :gnat.start_link(%{host: nats_url}) do
+        case Gnat.start_link(opts) do
           {:ok, conn} ->
-            :gnat.pub(conn, "machines.events", Jason.encode!(payload))
+            Gnat.pub(conn, "machines.events", Jason.encode!(payload))
             GenServer.stop(conn)
 
           {:error, reason} ->

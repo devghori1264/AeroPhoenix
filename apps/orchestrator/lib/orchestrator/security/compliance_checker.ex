@@ -7,7 +7,6 @@ defmodule Orchestrator.Security.ComplianceChecker do
     ComplianceFramework,
     ComplianceRequirement,
     ComplianceEvidence,
-    SecurityScan,
     Vulnerability,
     SecurityAuditLog,
     EncryptionKey
@@ -174,7 +173,7 @@ defmodule Orchestrator.Security.ComplianceChecker do
           occurred_at: DateTime.utc_now()
         })
 
-        state = update_in(state.stats.violations_found, &(&1 + 1))
+        _state = update_in(state.stats.violations_found, &(&1 + 1))
       end
 
       update_in(state.stats.requirements_verified, &(&1 + 1))
@@ -218,7 +217,7 @@ defmodule Orchestrator.Security.ComplianceChecker do
     end
   end
 
-  defp check_encryption(requirement) do
+  defp check_encryption(_requirement) do
     overdue_keys =
       from(k in EncryptionKey,
         where: k.status == "active" and k.rotation_due_at < ^DateTime.utc_now(),
@@ -249,7 +248,7 @@ defmodule Orchestrator.Security.ComplianceChecker do
     }
   end
 
-  defp check_audit_logging(requirement) do
+  defp check_audit_logging(_requirement) do
     cutoff = DateTime.utc_now() |> DateTime.add(-3600, :second)
 
     recent_logs =
@@ -271,7 +270,7 @@ defmodule Orchestrator.Security.ComplianceChecker do
     %{compliant: compliant, partial: false, evidence: evidence}
   end
 
-  defp check_vulnerabilities(requirement) do
+  defp check_vulnerabilities(_requirement) do
     critical_vulns =
       from(v in Vulnerability,
         where: v.status == "open" and v.severity in ["critical", "high"],

@@ -1,10 +1,8 @@
 defmodule Orchestrator.Replication.Coordinator do
   use GenServer
   require Logger
-  alias Orchestrator.Replication.{RaftConsensus, StateSync, RegionReplica}
   @type region_info :: map()
   defmodule State do
-    @moduledoc false
     defstruct [
       :regions,
       :leader_region,
@@ -74,9 +72,12 @@ defmodule Orchestrator.Replication.Coordinator do
     new_regions = Map.put(state.regions, region, region_info)
     new_state = %{state | regions: new_regions}
 
-    if state.leader_region == nil do
-      new_state = elect_leader(new_state)
-    end
+    new_state =
+      if state.leader_region == nil do
+        elect_leader(new_state)
+      else
+        new_state
+      end
 
     Logger.info("Region registered: #{region}")
     {:reply, :ok, new_state}

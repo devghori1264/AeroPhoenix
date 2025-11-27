@@ -12,6 +12,16 @@
     </script>
     <script>
       (() => {
+        const detectInitialTheme = () => {
+          const stored = localStorage.getItem("phx:theme");
+          if (stored) return stored;
+
+          if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            return "dark";
+          }
+          return "light";
+        };
+
         const setTheme = (theme) => {
           if (theme === "system") {
             localStorage.removeItem("phx:theme");
@@ -20,31 +30,51 @@
             localStorage.setItem("phx:theme", theme);
             document.documentElement.setAttribute("data-theme", theme);
           }
+
           const checkbox = document.getElementById("theme-checkbox");
           if (checkbox) {
             checkbox.checked = theme === "dark";
           }
         };
+
         const toggleTheme = () => {
-          const currentTheme = localStorage.getItem("phx:theme") || "light";
+          const currentTheme = localStorage.getItem("phx:theme") || detectInitialTheme();
           const newTheme = currentTheme === "dark" ? "light" : "dark";
           setTheme(newTheme);
         };
-        const initialTheme = localStorage.getItem("phx:theme") || "light";
+
+        const initialTheme = detectInitialTheme();
         setTheme(initialTheme);
 
         document.addEventListener("DOMContentLoaded", () => {
           const checkbox = document.getElementById("theme-checkbox");
           if (checkbox) {
+            checkbox.checked = initialTheme === "dark";
             checkbox.addEventListener("change", toggleTheme);
           }
         });
-        window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "light"));
+
+        if (window.matchMedia) {
+          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (!localStorage.getItem("phx:theme")) {
+              setTheme(e.matches ? "dark" : "light");
+            }
+          });
+        }
+
+        window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || detectInitialTheme()));
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
       })();
     </script>
   </head>
   <body>
+    <div class="aurora-background">
+      <div class="aurora-blob"></div>
+      <div class="aurora-blob"></div>
+      <div class="aurora-blob"></div>
+      <div class="aurora-blob"></div>
+      <div class="aurora-blob"></div>
+    </div>
     {@inner_content}
   </body>
 </html>

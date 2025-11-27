@@ -65,7 +65,6 @@ defmodule Orchestrator.Cost.RightsizingRecommendation do
     timestamps()
   end
 
-  @doc false
   def changeset(recommendation, attrs) do
     recommendation
     |> cast(attrs, [
@@ -121,6 +120,8 @@ defmodule Orchestrator.Cost.RightsizingRecommendation do
 
   @spec generate(binary(), map()) :: {:ok, t()} | {:error, Ecto.Changeset.t()}
   def generate(machine_id, attrs) do
+    attrs = Map.put(attrs, :machine_id, machine_id)
+
     %__MODULE__{}
     |> changeset(attrs)
     |> Repo.insert()

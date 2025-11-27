@@ -6,7 +6,7 @@ defmodule Orchestrator.FeatureFlags.Jobs.ExperimentAnalysisJob do
 
   require Logger
   alias Orchestrator.FeatureFlags
-  alias Orchestrator.FeatureFlags.{ExperimentAnalyzer, Distribution}
+  alias Orchestrator.FeatureFlags.ExperimentAnalyzer
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"experiment_id" => experiment_id}}) do
     Logger.info("Running analysis for experiment: #{experiment_id}")

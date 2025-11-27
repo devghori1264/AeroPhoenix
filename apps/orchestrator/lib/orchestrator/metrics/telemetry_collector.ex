@@ -1,7 +1,6 @@
 defmodule Orchestrator.Metrics.TelemetryCollector do
   use GenServer
   require Logger
-  alias Orchestrator.Repo
   alias Orchestrator.Metrics.{MetricDefinition, MetricSample}
   @type metric_type :: :counter | :gauge | :histogram | :summary
   @type labels :: %{atom() => String.t()}
@@ -290,7 +289,7 @@ defmodule Orchestrator.Metrics.TelemetryCollector do
 
     result =
       if length(all_samples) > 0 do
-        MetricSample.record_batch(all_samples)
+        MetricSample.record_batch(all_samples, %{})
       else
         {:ok, 0}
       end

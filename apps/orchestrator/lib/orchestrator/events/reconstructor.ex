@@ -1,6 +1,7 @@
 defmodule Orchestrator.Events.Reconstructor do
   require Logger
-  alias Orchestrator.Events.{Event, Reader, Snapshot, Writer}
+  import Ecto.Query
+  alias Orchestrator.Events.{Event, Reader, Snapshot}
   alias Orchestrator.Repo
 
   @type rebuild_opts :: [
@@ -165,11 +166,12 @@ defmodule Orchestrator.Events.Reconstructor do
       end
 
     events_query =
-      Event
-      |> Event.for_aggregate(aggregate_id)
-      |> Ecto.Query.where([e], e.occurred_at <= ^timestamp)
-      |> Ecto.Query.where([e], e.aggregate_version > ^from_version)
-      |> Ecto.Query.order_by([e], asc: e.aggregate_version)
+      from(e in Event,
+        where: e.aggregate_id == ^aggregate_id,
+        where: e.occurred_at <= ^timestamp,
+        where: e.aggregate_version > ^from_version,
+        order_by: [asc: e.aggregate_version]
+      )
 
     events = Repo.all(events_query)
 

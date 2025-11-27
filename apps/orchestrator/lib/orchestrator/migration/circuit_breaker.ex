@@ -4,7 +4,6 @@ defmodule Orchestrator.Migration.CircuitBreaker do
   @type state :: :closed | :open | :half_open
   @type circuit_name :: atom() | String.t()
   defmodule Circuit do
-    @moduledoc false
     defstruct [
       :name,
       :state,

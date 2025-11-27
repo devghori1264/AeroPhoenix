@@ -241,6 +241,8 @@ defmodule Orchestrator.FeatureFlags.Statistics do
   end
 
   defp incomplete_beta(x, a, b) do
+    _ = a
+    _ = b
     if x == 0, do: 0.0, else: if(x == 1, do: 1.0, else: 0.5)
   end
 
@@ -301,6 +303,7 @@ defmodule Orchestrator.FeatureFlags.Statistics do
       v_squared = v * v
 
       if u < 1 - 0.0331 * v_squared * v_squared do
+        _ = v_cubed
         d * v1 * v1 * v1
       else
         if :math.log(u) < 0.5 * v_squared + d * (1 - v1 + :math.log(v1)) do

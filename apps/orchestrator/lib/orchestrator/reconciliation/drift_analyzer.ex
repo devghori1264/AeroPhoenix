@@ -23,9 +23,6 @@ defmodule Orchestrator.Reconciliation.DriftAnalyzer do
     "starting" => MapSet.new(["starting", "initializing", "booting"]),
     "error" => MapSet.new(["error", "failed", "crashed", "broken"])
   }
-  @critical_fields ~w[id name machine_type cpu_count memory_mb]
-  @major_fields ~w[status region ip_address dns_name]
-  @minor_fields ~w[uptime_seconds last_health_check metadata_labels]
   @spec analyze(state_map(), state_map(), map()) ::
           {:ok, analysis_result()} | {:error, term()}
   def analyze(source_state, target_state, config) do

@@ -68,7 +68,7 @@ defmodule PhoenixUi.MixProject do
       {:plug_cowboy, "~> 2.6"},
       {:ecto_sql, "~> 3.11"},
       {:floki, ">= 0.30.0", only: :test},
-      {:oban, "~> 2.16", only: :prod},
+      {:oban, "~> 2.16"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:telemetry, "~> 1.2"},
       {:uuid, "~> 1.1"},
@@ -76,7 +76,9 @@ defmodule PhoenixUi.MixProject do
       {:opentelemetry_api, "~> 1.0"},
       {:tesla, "~> 1.7"},
       {:opentelemetry_exporter, "~> 1.0"},
-      {:gnat, "~> 1.6"}
+      {:gnat, "~> 1.6"},
+      {:gun, "~> 2.1", override: true},
+      {:orchestrator, path: "../orchestrator"}
     ]
   end
 

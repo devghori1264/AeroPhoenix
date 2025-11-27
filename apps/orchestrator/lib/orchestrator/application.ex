@@ -11,11 +11,23 @@ defmodule Orchestrator.Application do
       {Phoenix.PubSub, name: Orchestrator.PubSub},
       {Finch, name: Orchestrator.Finch},
       {Registry, keys: :unique, name: Orchestrator.FSMRegistry},
+      {Registry, keys: :unique, name: Orchestrator.MachineActorRegistry},
+      {Registry, keys: :unique, name: Orchestrator.DebuggerRegistry},
       Orchestrator.RegionRegistry,
       Orchestrator.Migration.CircuitBreaker,
       Orchestrator.ChaosEngine,
       Orchestrator.Manager,
       Orchestrator.MachineManager,
+      Orchestrator.MachineActor.Supervisor,
+      Orchestrator.ResourceManager,
+      Orchestrator.ResourceQueue,
+      Orchestrator.ResourceCoordinator,
+      {Orchestrator.Replication.PartitionDetector, cluster_size: cluster_size()},
+      {Orchestrator.Replication.StateSync,
+       source_region: region_id(), target_regions: peer_regions()},
+      Orchestrator.Security.OIDCProvider,
+      Orchestrator.Security.KillSwitch,
+      Orchestrator.Recovery.Reconciler,
       Orchestrator.NatsListener,
       {TelemetryMetricsPrometheus,
        metrics: Orchestrator.Metrics.metrics(), port: telemetry_port(), path: "/metrics"},
@@ -32,5 +44,21 @@ defmodule Orchestrator.Application do
     :ok
   end
 
-  defp telemetry_port, do: String.to_integer(System.get_env("TELEMETRY_PORT", "9568"))
+  defp telemetry_port, do: String.to_integer(System.get_env("TELEMETRY_PORT", "9569"))
+
+  defp cluster_size do
+    default = if Mix.env() in [:dev, :test], do: "1", else: "3"
+    System.get_env("CLUSTER_SIZE", default) |> String.to_integer()
+  end
+
+  defp region_id do
+    System.get_env("FLY_REGION", "local")
+  end
+
+  defp peer_regions do
+    case System.get_env("PEER_REGIONS") do
+      nil -> []
+      regions -> String.split(regions, ",", trim: true)
+    end
+  end
 end

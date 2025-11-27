@@ -2,7 +2,7 @@ defmodule Orchestrator.Placement.Scheduler do
   use GenServer
   require Logger
   alias Orchestrator.{Repo, Machine}
-  alias Orchestrator.Placement.{RegionCapacity, ComplianceRules, CostModel, LatencyMatrix}
+  alias Orchestrator.Placement.{ComplianceRules, CostModel, LatencyMatrix}
   import Ecto.Query
 
   @type machine_requirements :: %{
@@ -28,7 +28,7 @@ defmodule Orchestrator.Placement.Scheduler do
     cost: 0.25,
     compliance: 0.15
   }
-  @optimization_goals [:cost, :latency, :balanced, :compliance]
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -412,7 +412,7 @@ defmodule Orchestrator.Placement.Scheduler do
     if all_satisfied, do: 1.0, else: 0.0
   end
 
-  defp build_reasoning(region, resource_score, latency_score, cost_score, compliance_score) do
+  defp build_reasoning(_region, resource_score, latency_score, cost_score, compliance_score) do
     scores = [
       {"resource", resource_score},
       {"latency", latency_score},

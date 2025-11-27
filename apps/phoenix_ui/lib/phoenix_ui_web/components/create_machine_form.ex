@@ -2,7 +2,7 @@ defmodule PhoenixUiWeb.CreateMachineForm do
   use Phoenix.Component
   import PhoenixUiWeb.CoreComponents
 
-  attr :regions, :list, required: true
+  attr(:regions, :list, required: true)
 
   def render(assigns) do
     assigns = assign(assigns, :expanded_regions, expand_regions(assigns.regions))

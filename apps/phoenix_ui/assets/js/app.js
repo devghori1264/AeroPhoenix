@@ -10,6 +10,17 @@ import ClipboardHook from "./hooks/clipboard_hook";
 import MetricsChartHook from "./hooks/metrics_chart_hook";
 import ChaosOverlayHook from "./hooks/chaos_overlay_hook";
 import ToastHook from "./hooks/toast_hook";
+import MigrationStudioHook from "./hooks/migration-studio";
+import FsmVisualizerHook from "./hooks/fsm-visualizer";
+import DebuggerEnhancementsHook from "./hooks/debugger-enhancements";
+import MetricsDashboardHook from "./hooks/metrics-dashboard";
+import LogStreamHook from "./hooks/log-stream";
+import OptimizerDashboardHook from "./hooks/optimizer-dashboard";
+import ScalingVisualizerHook from "./hooks/scaling-visualizer";
+import FeatureFlagsHook from "./hooks/feature-flags";
+import MicroInteractionsHook from "./hooks/micro-interactions";
+import ThemeSystemHook from "./hooks/theme-system";
+import EventTimelineHook from "./hooks/event-timeline";
 
 initTheme();
 
@@ -23,6 +34,17 @@ const Hooks = {
   MetricsChartHook,
   ChaosOverlayHook,
   ToastHook,
+  MigrationStudio: MigrationStudioHook,
+  FsmGraphHook: FsmVisualizerHook,
+  DebuggerEnhancements: DebuggerEnhancementsHook,
+  MetricsDashboard: MetricsDashboardHook,
+  LogStream: LogStreamHook,
+  OptimizerDashboard: OptimizerDashboardHook,
+  ScalingVisualizer: ScalingVisualizerHook,
+  FeatureFlags: FeatureFlagsHook,
+  MicroInteractions: MicroInteractionsHook,
+  ThemeSystem: ThemeSystemHook,
+  EventTimeline: EventTimelineHook,
 };
 
 Hooks.ChaosPulse = {
@@ -162,6 +184,64 @@ Hooks.CopyCli = {
   },
 };
 
+Hooks.EventReplayDownload = {
+  mounted() {
+    console.log("[EventReplayDownload] Hook mounted");
+    
+    this.handleEvent("download-events", ({ events, format, filename }) => {
+      console.log(`[EventReplayDownload] Downloading ${events.length} events as ${format}`);
+      
+      try {
+        let content, mimeType;
+        
+        if (format === "json") {
+          content = JSON.stringify(events, null, 2);
+          mimeType = "application/json";
+        } else if (format === "csv") {
+          const headers = ["ID", "Type", "Aggregate ID", "Version", "Timestamp", "Correlation ID", "User ID"];
+          const rows = events.map(event => [
+            event.id || "",
+            event.event_type || "",
+            event.aggregate_id || "",
+            event.aggregate_version || "",
+            event.timestamp || "",
+            event.correlation_id || "",
+            event.metadata?.user_id || ""
+          ]);
+          
+          const csvContent = [
+            headers.join(","),
+            ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
+          ].join("\n");
+          
+          content = csvContent;
+          mimeType = "text/csv";
+        } else {
+          console.error("[EventReplayDownload] Unknown format:", format);
+          return;
+        }
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        console.info("[EventReplayDownload] Download initiated successfully");
+      } catch (error) {
+        console.error("[EventReplayDownload] Download failed:", error);
+        alert("Failed to download events. See console for details.");
+      }
+    });
+  },
+  destroyed() {
+    console.log("[EventReplayDownload] Hook destroyed");
+  }
+};
+
 const csrfToken = document
   .querySelector("meta[name='csrf-token']")
   ?.getAttribute("content");
@@ -176,6 +256,12 @@ const liveSocket = new LiveSocket("/live", Socket, {
   hooks: Hooks,
   longPollFallbackMs: 2500,
   params: { _csrf_token: csrfToken },
+  onError: (error) => {
+    console.error("[AeroPhoenix] LiveSocket error:", error);
+  },
+  onReconnect: () => {
+    console.info("[AeroPhoenix] LiveSocket reconnected");
+  }
 });
 
 topbar.config({
@@ -249,3 +335,10 @@ if (process.env.NODE_ENV === "development") {
 
 console.info("[AeroPhoenix] LiveSocket connected successfully.");
 console.groupEnd();
+window.addEventListener('error', (event) => {
+  console.error('[AeroPhoenix] Global error caught:', event.error);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[AeroPhoenix] Unhandled promise rejection:', event.reason);
+});

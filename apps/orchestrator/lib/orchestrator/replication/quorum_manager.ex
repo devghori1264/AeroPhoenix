@@ -4,7 +4,6 @@ defmodule Orchestrator.Replication.QuorumManager do
   @type consistency_level :: :strong | :eventual | :causal
   @type quorum_result :: {:ok, term()} | {:error, :quorum_not_met}
   defmodule Config do
-    @moduledoc false
     defstruct [
       :read_quorum,
       :write_quorum,
@@ -94,7 +93,7 @@ defmodule Orchestrator.Replication.QuorumManager do
     }
   end
 
-  defp read_from_replica(replica, key, timeout) do
+  defp read_from_replica(replica, key, _timeout) do
     try do
       :timer.sleep(:rand.uniform(50))
 
@@ -110,7 +109,7 @@ defmodule Orchestrator.Replication.QuorumManager do
     end
   end
 
-  defp write_to_replica(replica, key, value, vector_clock, timeout) do
+  defp write_to_replica(replica, key, value, vector_clock, _timeout) do
     try do
       :timer.sleep(:rand.uniform(50))
 

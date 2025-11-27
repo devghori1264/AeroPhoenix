@@ -2,7 +2,7 @@ defmodule Orchestrator.Reconciliation.Engine do
   use GenServer
   require Logger
   alias Orchestrator.{Repo, Machine, FlydClient}
-  alias Orchestrator.Reconciliation.{StateVerifier, DriftAnalyzer, AutoHealer, AuditLog}
+  alias Orchestrator.Reconciliation.{DriftAnalyzer, AutoHealer}
   @type reconciliation_level :: :basic | :standard | :deep | :paranoid
   @type healing_strategy :: :auto | :manual | :rollback
   @type drift_severity :: :critical | :major | :minor | :none
@@ -36,9 +36,7 @@ defmodule Orchestrator.Reconciliation.Engine do
   }
   @reconciliation_interval 30_000
   @checkpoint_interval 100
-  @max_concurrent_reconciliations 10
   defmodule State do
-    @moduledoc false
     defstruct [
       :config,
       :active_reconciliations,
@@ -344,7 +342,6 @@ defmodule Orchestrator.Reconciliation.Engine do
           %{machine_id: machine.id, status: reconciliation_result.status}
         )
 
-        AuditLog.record_reconciliation(reconciliation_result)
         {:ok, reconciliation_result}
       else
         {:error, reason} = error ->

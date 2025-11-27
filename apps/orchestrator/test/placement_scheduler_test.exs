@@ -5,13 +5,10 @@ defmodule Orchestrator.PlacementSchedulerTest do
 
   describe "schedule_machine/2" do
     test "schedules machine to best-fit region based on multi-objective scoring" do
-      # Setup: Create capacity data
       regions = ["us-east-1", "us-west-1", "eu-west-1"]
 
-      # Start scheduler
       {:ok, _pid} = Scheduler.start_link(regions: regions)
 
-      # Request placement for machine with specific requirements
       machine_spec = %{
         cpu: 4,
         memory_gb: 16,
@@ -22,15 +19,12 @@ defmodule Orchestrator.PlacementSchedulerTest do
 
       {:ok, recommendation} = Scheduler.schedule_machine(machine_spec, %{})
 
-      # Verify recommendation
       assert recommendation.selected_region in regions
       assert recommendation.score > 0.0
       assert recommendation.score <= 1.0
 
-      # For GDPR compliance and EU traffic, should prefer eu-west-1
       assert recommendation.selected_region == "eu-west-1"
 
-      # Verify reasoning
       assert Map.has_key?(recommendation, :resource_score)
       assert Map.has_key?(recommendation, :latency_score)
       assert Map.has_key?(recommendation, :cost_score)
@@ -40,7 +34,6 @@ defmodule Orchestrator.PlacementSchedulerTest do
     test "respects compliance rules" do
       {:ok, _pid} = Scheduler.start_link(regions: ["us-east-1", "eu-west-1"])
 
-      # Request with HIPAA compliance
       machine_spec = %{
         cpu: 2,
         memory_gb: 8,
@@ -50,14 +43,12 @@ defmodule Orchestrator.PlacementSchedulerTest do
 
       {:ok, recommendation} = Scheduler.schedule_machine(machine_spec, %{})
 
-      # Should only select HIPAA-compliant regions (us-east-1 or us-west-2)
       assert recommendation.selected_region in ["us-east-1", "us-west-2"]
     end
 
     test "handles resource constraints" do
       {:ok, _pid} = Scheduler.start_link(regions: ["us-east-1"])
 
-      # Request that exceeds available capacity
       large_spec = %{
         cpu: 1000,
         memory_gb: 10000,
@@ -66,7 +57,6 @@ defmodule Orchestrator.PlacementSchedulerTest do
 
       result = Scheduler.schedule_machine(large_spec, %{})
 
-      # Should return error or degraded recommendation
       assert match?({:error, _}, result) or
                match?({:ok, %{warnings: [_ | _]}}, result)
     end
@@ -84,14 +74,11 @@ defmodule Orchestrator.PlacementSchedulerTest do
 
       {:ok, batch_result} = Scheduler.schedule_batch(machines, %{})
 
-      # Verify all machines placed
       assert length(batch_result.placements) == 3
 
-      # Verify distribution (should balance across regions)
       region_counts =
         Enum.frequencies_by(batch_result.placements, fn p -> p.region end)
 
-      # Should use multiple regions
       assert map_size(region_counts) > 1
     end
   end
@@ -100,7 +87,6 @@ defmodule Orchestrator.PlacementSchedulerTest do
     test "identifies migration opportunities for cost/latency improvement" do
       {:ok, _pid} = Scheduler.start_link(regions: ["us-east-1", "us-west-1", "eu-west-1"])
 
-      # Create some machines with suboptimal placement
       {:ok, machine1} =
         %Machine{}
         |> Machine.changeset(%{
@@ -115,10 +101,8 @@ defmodule Orchestrator.PlacementSchedulerTest do
 
       result = Scheduler.reoptimize_placements(%{})
 
-      # Verify recommendations returned
       assert is_list(result.recommendations)
 
-      # Should include migration suggestions if better regions exist
       if length(result.recommendations) > 0 do
         rec = List.first(result.recommendations)
         assert Map.has_key?(rec, :machine_id)
@@ -127,7 +111,6 @@ defmodule Orchestrator.PlacementSchedulerTest do
         assert Map.has_key?(rec, :improvement_score)
       end
 
-      # Cleanup
       Repo.delete(machine1)
     end
   end

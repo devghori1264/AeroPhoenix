@@ -53,4 +53,25 @@ defmodule Orchestrator.Scaling.ScalingPolicy do
       message: "must be greater than or equal to min_instances"
     )
   end
+
+  def create(attrs) do
+    %__MODULE__{}
+    |> changeset(attrs)
+    |> Orchestrator.Repo.insert()
+  end
+
+  def update(policy, attrs) do
+    policy
+    |> changeset(attrs)
+    |> Orchestrator.Repo.update()
+  end
+
+  def list_enabled do
+    import Ecto.Query
+    Orchestrator.Repo.all(from(p in __MODULE__, where: p.enabled == true))
+  end
+
+  def get_by_service(service_name) do
+    Orchestrator.Repo.get_by(__MODULE__, service_name: service_name)
+  end
 end

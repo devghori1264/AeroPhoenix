@@ -16,8 +16,6 @@ defmodule Orchestrator.Metrics.AlertEngine do
   @default_batch_size 50
   @default_notification_timeout 5000
   @default_re_notification_interval 3600
-  @max_notification_retries 3
-  @retry_backoff_ms 1000
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -448,7 +446,7 @@ defmodule Orchestrator.Metrics.AlertEngine do
     elapsed = DateTime.diff(DateTime.utc_now(), instance.started_at)
 
     if elapsed >= rule.duration_seconds do
-      {:ok, fired_instance} = AlertInstance.fire(instance, value)
+      {:ok, fired_instance} = AlertInstance.fire(instance)
       Logger.warning("Alert FIRED: #{rule.name} (value: #{value}, threshold: #{rule.threshold})")
       state = send_notifications(rule, fired_instance, state)
       AlertRule.update(rule, %{last_state: "firing"})
@@ -459,7 +457,7 @@ defmodule Orchestrator.Metrics.AlertEngine do
   end
 
   defp update_firing_alert(instance, value, state) do
-    AlertInstance.update(instance, %{current_value: value})
+    AlertInstance.update_value(instance, %{current_value: value})
 
     if should_re_notify?(instance, state.re_notification_interval) do
       rule = Repo.get!(AlertRule, instance.alert_rule_id)
@@ -470,7 +468,7 @@ defmodule Orchestrator.Metrics.AlertEngine do
   end
 
   defp reopen_alert(rule, instance, value, state) do
-    AlertInstance.update(instance, %{
+    AlertInstance.update_value(instance, %{
       state: "pending",
       current_value: value,
       started_at: DateTime.utc_now(),
@@ -518,7 +516,7 @@ defmodule Orchestrator.Metrics.AlertEngine do
       failures = Enum.count(results, &match?({:error, _}, &1))
 
       if successes > 0 do
-        AlertInstance.record_notification(instance)
+        AlertInstance.record_notification(instance, :slack)
       end
 
       state
@@ -565,22 +563,22 @@ defmodule Orchestrator.Metrics.AlertEngine do
     {:ok, %{channel: "email", sent_at: DateTime.utc_now()}}
   end
 
-  defp send_slack_notification(message, timeout) do
+  defp send_slack_notification(message, _timeout) do
     Logger.info("SLACK notification: #{message.title}")
     {:ok, %{channel: "slack", sent_at: DateTime.utc_now()}}
   end
 
-  defp send_pagerduty_notification(message, timeout) do
+  defp send_pagerduty_notification(message, _timeout) do
     Logger.info("PAGERDUTY notification: #{message.title}")
     {:ok, %{channel: "pagerduty", sent_at: DateTime.utc_now()}}
   end
 
-  defp send_webhook_notification(message, timeout) do
+  defp send_webhook_notification(message, _timeout) do
     Logger.info("WEBHOOK notification: #{message.title}")
     {:ok, %{channel: "webhook", sent_at: DateTime.utc_now()}}
   end
 
-  defp send_sms_notification(message, timeout) do
+  defp send_sms_notification(message, _timeout) do
     Logger.info("SMS notification: #{message.title}")
     {:ok, %{channel: "sms", sent_at: DateTime.utc_now()}}
   end

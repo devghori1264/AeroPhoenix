@@ -35,7 +35,6 @@ defmodule Orchestrator.Metrics.MetricDefinition do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc false
   def changeset(metric, attrs) do
     metric
     |> cast(attrs, [

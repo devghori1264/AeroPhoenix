@@ -46,7 +46,6 @@ defmodule Orchestrator.Cost.BudgetAlert do
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 
-  @doc false
   def changeset(alert, attrs) do
     alert
     |> cast(attrs, [

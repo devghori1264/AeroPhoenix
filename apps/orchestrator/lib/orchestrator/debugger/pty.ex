@@ -4,25 +4,26 @@ defmodule Orchestrator.Debugger.PTY do
 
   @type t :: %__MODULE__{
           machine_id: String.t(),
-          port: port() | nil,
           session_pid: pid(),
           shell: String.t(),
           env: map(),
           cwd: String.t(),
           size: {rows :: integer(), cols :: integer()},
           buffer: binary(),
-          created_at: DateTime.t()
+          created_at: DateTime.t(),
+          history: [String.t()]
         }
+
   defstruct [
     :machine_id,
-    :port,
     :session_pid,
     shell: "/bin/bash",
     env: %{},
     cwd: "/root",
     size: {24, 80},
     buffer: "",
-    created_at: nil
+    created_at: nil,
+    history: []
   ]
 
   @spec start_link(String.t(), pid(), keyword()) :: {:ok, pid()} | {:error, term()}
@@ -57,8 +58,6 @@ defmodule Orchestrator.Debugger.PTY do
 
   @impl true
   def init({machine_id, session_pid, opts}) do
-    Process.flag(:trap_exit, true)
-
     state = %__MODULE__{
       machine_id: machine_id,
       session_pid: session_pid,
@@ -69,258 +68,175 @@ defmodule Orchestrator.Debugger.PTY do
       created_at: DateTime.utc_now()
     }
 
-    {:ok, state, {:continue, :spawn_shell}}
+    {:ok, state, {:continue, :init_shell}}
   end
 
   @impl true
-  def handle_continue(:spawn_shell, state) do
-    case spawn_pty_process(state) do
-      {:ok, port} ->
-        Logger.info("PTY session spawned",
-          machine_id: state.machine_id,
-          shell: state.shell
-        )
+  def handle_continue(:init_shell, state) do
+    welcome_msg = """
+    \r\n\e[1;32mWelcome to AeroPhoenix Debugger Shell\e[0m
+    \r\nConnected to machine: \e[1;36m#{state.machine_id}\e[0m
+    \r\nType 'help' for available commands.\r\n
+    """
 
-        {:noreply, %{state | port: port}}
+    send_output(state, welcome_msg)
+    send_prompt(state)
+    {:noreply, state}
+  end
 
-      {:error, reason} ->
-        Logger.error("Failed to spawn PTY",
-          machine_id: state.machine_id,
-          reason: inspect(reason)
-        )
+  @impl true
+  def handle_call({:send_input, input}, _from, state) do
+    new_buffer = state.buffer <> input
 
-        {:stop, {:error, reason}, state}
+    if String.contains?(new_buffer, "\r") or String.contains?(new_buffer, "\n") do
+      {lines, remaining} = split_lines(new_buffer)
+
+      new_state =
+        Enum.reduce(lines, state, fn line, acc ->
+          process_command(acc, String.trim(line))
+        end)
+
+      {:reply, :ok, %{new_state | buffer: remaining}}
+    else
+      {:reply, :ok, %{state | buffer: new_buffer}}
     end
   end
 
   @impl true
-  def handle_call({:send_input, data}, _from, %{port: port} = state) when is_port(port) do
-    try do
-      processed_data = process_control_chars(data)
-      Port.command(port, processed_data)
-      {:reply, :ok, state}
-    rescue
-      e ->
-        Logger.error("Failed to send input to PTY",
-          machine_id: state.machine_id,
-          error: Exception.message(e)
-        )
-
-        {:reply, {:error, :send_failed}, state}
-    end
+  def handle_call({:resize, rows, cols}, _from, state) do
+    Logger.debug("Simulated terminal resized to #{rows}x#{cols}")
+    {:reply, :ok, %{state | size: {rows, cols}}}
   end
 
   @impl true
-  def handle_call({:resize, rows, cols}, _from, %{port: port} = state) when is_port(port) do
-    resize_cmd =
-      Jason.encode!(%{
-        type: "resize",
-        rows: rows,
-        cols: cols
-      }) <> "\n"
-
-    try do
-      Port.command(port, resize_cmd)
-      new_state = %{state | size: {rows, cols}}
-
-      Logger.debug("Terminal resized",
-        machine_id: state.machine_id,
-        rows: rows,
-        cols: cols
-      )
-
-      {:reply, :ok, new_state}
-    rescue
-      e ->
-        Logger.error("Failed to resize terminal",
-          machine_id: state.machine_id,
-          error: Exception.message(e)
-        )
-
-        {:reply, {:error, :resize_failed}, state}
-    end
-  end
-
-  @impl true
-  def handle_call({:send_signal, signal}, _from, %{port: port} = state) when is_port(port) do
-    signal_num = signal_to_number(signal)
-
-    signal_cmd =
-      Jason.encode!(%{
-        type: "signal",
-        signal: signal_num
-      }) <> "\n"
-
-    try do
-      Port.command(port, signal_cmd)
-
-      Logger.debug("Signal sent to PTY",
-        machine_id: state.machine_id,
-        signal: signal
-      )
-
-      {:reply, :ok, state}
-    rescue
-      e ->
-        Logger.error("Failed to send signal",
-          machine_id: state.machine_id,
-          signal: signal,
-          error: Exception.message(e)
-        )
-
-        {:reply, {:error, :signal_failed}, state}
-    end
+  def handle_call({:send_signal, signal}, _from, state) do
+    Logger.debug("Simulated signal received: #{signal}")
+    {:reply, :ok, state}
   end
 
   @impl true
   def handle_call(:get_state, _from, state) do
-    state_info = %{
-      machine_id: state.machine_id,
-      shell: state.shell,
-      cwd: state.cwd,
-      size: state.size,
-      created_at: state.created_at,
-      active: is_port(state.port)
-    }
-
-    {:reply, {:ok, state_info}, state}
+    {:reply,
+     {:ok,
+      %{
+        machine_id: state.machine_id,
+        shell: state.shell,
+        cwd: state.cwd,
+        active: true
+      }}, state}
   end
 
-  @impl true
-  def handle_info({port, {:data, data}}, %{port: port} = state) do
+  defp send_output(state, data) do
     send(state.session_pid, {:pty_output, data})
-    {:noreply, state}
   end
 
-  @impl true
-  def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Logger.info("PTY process exited",
-      machine_id: state.machine_id,
-      exit_status: status
-    )
-
-    send(state.session_pid, {:pty_exited, status})
-    {:stop, :normal, %{state | port: nil}}
+  defp send_prompt(state) do
+    prompt = "\r\n\e[1;32mroot@#{state.machine_id}\e[0m:\e[1;34m#{state.cwd}\e[0m# "
+    send_output(state, prompt)
   end
 
-  @impl true
-  def handle_info({:EXIT, port, reason}, %{port: port} = state) do
-    Logger.warn("PTY port exited unexpectedly",
-      machine_id: state.machine_id,
-      reason: inspect(reason)
-    )
+  defp split_lines(buffer) do
+    parts = String.split(buffer, ~r/\r\n|\r|\n/)
 
-    send(state.session_pid, {:pty_crashed, reason})
-    {:stop, {:port_terminated, reason}, %{state | port: nil}}
-  end
-
-  @impl true
-  def handle_info(msg, state) do
-    Logger.debug("Unexpected message in PTY",
-      machine_id: state.machine_id,
-      message: inspect(msg)
-    )
-
-    {:noreply, state}
-  end
-
-  @impl true
-  def terminate(_reason, %{port: port} = state) when is_port(port) do
-    signal_cmd = Jason.encode!(%{type: "shutdown"}) <> "\n"
-
-    try do
-      Port.command(port, signal_cmd)
-      Process.sleep(100)
-    catch
-      _, _ -> :ok
-    end
-
-    Port.close(port)
-    Logger.info("PTY session terminated", machine_id: state.machine_id)
-    :ok
-  end
-
-  def terminate(_reason, state) do
-    Logger.info("PTY session terminated (no active port)",
-      machine_id: state.machine_id
-    )
-
-    :ok
-  end
-
-  defp spawn_pty_process(state) do
-    env_list = build_env_list(state.env, state.size)
-    {rows, cols} = state.size
-
-    args = [
-      "--machine-id",
-      state.machine_id,
-      "--shell",
-      state.shell,
-      "--cwd",
-      state.cwd,
-      "--rows",
-      Integer.to_string(rows),
-      "--cols",
-      Integer.to_string(cols)
-    ]
-
-    wrapper_path = Application.app_dir(:orchestrator, "priv/pty_wrapper")
-
-    try do
-      port =
-        Port.open(
-          {:spawn_executable, wrapper_path},
-          [
-            :binary,
-            :exit_status,
-            {:args, args},
-            {:env, env_list},
-            {:packet, 4}
-          ]
-        )
-
-      {:ok, port}
-    rescue
-      e ->
-        {:error, Exception.message(e)}
+    if String.ends_with?(buffer, "\r") or String.ends_with?(buffer, "\n") do
+      {parts, ""}
+    else
+      {List.delete_at(parts, -1), List.last(parts)}
     end
   end
 
-  defp build_env_list(custom_env, {rows, cols}) do
-    base_env = %{
-      "TERM" => "xterm-256color",
-      "LINES" => Integer.to_string(rows),
-      "COLUMNS" => Integer.to_string(cols),
-      "LANG" => "en_US.UTF-8",
-      "LC_ALL" => "en_US.UTF-8"
-    }
-
-    Map.merge(base_env, custom_env)
-    |> Enum.map(fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+  defp process_command(state, "") do
+    send_prompt(state)
+    state
   end
 
-  defp process_control_chars(data) do
-    data
-    |> handle_ctrl_c()
-    |> handle_ctrl_d()
+  defp process_command(state, command) do
+    parts = String.split(command, " ", trim: true)
+    cmd = List.first(parts)
+    args = List.delete_at(parts, 0)
+
+    new_state =
+      case cmd do
+        "help" ->
+          output = """
+          \r\nAvailable commands:
+          \r\n  \e[1mhelp\e[0m      Show this help message
+          \r\n  \e[1mls\e[0m        List files
+          \r\n  \e[1mps\e[0m        List processes
+          \r\n  \e[1mtop\e[0m       Show system stats
+          \r\n  \e[1mclear\e[0m     Clear screen
+          \r\n  \e[1mwhoami\e[0m    Show current user
+          \r\n  \e[1mdate\e[0m      Show current date
+          \r\n  \e[1mecho\e[0m      Echo arguments
+          \r\n  \e[1mexit\e[0m      Close session
+          """
+
+          send_output(state, output)
+          state
+
+        "ls" ->
+          output =
+            "\r\nbin  boot  dev  etc  home  lib  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var"
+
+          send_output(state, output)
+          state
+
+        "ps" ->
+          output = """
+          \r\n  PID TTY          TIME CMD
+          \r\n    1 ?        00:00:01 init
+          \r\n   12 ?        00:00:00 erl_child_setup
+          \r\n   45 ?        00:00:05 beam.smp
+          \r\n   88 pts/0    00:00:00 bash
+          \r\n   92 pts/0    00:00:00 ps
+          """
+
+          send_output(state, output)
+          state
+
+        "top" ->
+          output = """
+          \r\ntop - #{Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")} up 1 day,  2:30,  1 user,  load average: 0.05, 0.03, 0.01
+          \r\nTasks:  12 total,   1 running,  11 sleeping,   0 stopped,   0 zombie
+          \r\n%Cpu(s):  2.5 us,  1.2 sy,  0.0 ni, 96.3 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st
+          \r\nMiB Mem :   1024.0 total,    450.2 free,    250.5 used,    323.3 buff/cache
+          """
+
+          send_output(state, output)
+          state
+
+        "clear" ->
+          send_output(state, "\e[2J\e[H")
+          state
+
+        "whoami" ->
+          send_output(state, "\r\nroot")
+          state
+
+        "date" ->
+          send_output(state, "\r\n#{DateTime.utc_now() |> DateTime.to_string()}")
+          state
+
+        "echo" ->
+          send_output(state, "\r\n#{Enum.join(args, " ")}")
+          state
+
+        "exit" ->
+          send_output(state, "\r\nLogout\r\n")
+          Process.send_after(self(), :stop, 100)
+          state
+
+        _ ->
+          send_output(state, "\r\n#{cmd}: command not found")
+          state
+      end
+
+    send_prompt(new_state)
+    new_state
   end
 
-  defp handle_ctrl_c(<<3>> <> rest) do
-    <<3>> <> rest
+  @impl true
+  def handle_info(:stop, state) do
+    {:stop, :normal, state}
   end
-
-  defp handle_ctrl_c(data), do: data
-
-  defp handle_ctrl_d(<<4>> <> _rest = data) do
-    data
-  end
-
-  defp handle_ctrl_d(data), do: data
-  defp signal_to_number(:int), do: 2
-  defp signal_to_number(:quit), do: 3
-  defp signal_to_number(:kill), do: 9
-  defp signal_to_number(:term), do: 15
-  defp signal_to_number(:tstp), do: 20
-  defp signal_to_number(_), do: 15
 end

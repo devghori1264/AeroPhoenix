@@ -3,7 +3,6 @@ defmodule Orchestrator.Migration.LoadTest do
   alias Orchestrator.FlydClient
 
   defmodule LoadTestResult do
-    @moduledoc false
     defstruct [
       :test_type,
       :start_time,

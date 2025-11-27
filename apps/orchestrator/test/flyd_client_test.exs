@@ -8,10 +8,8 @@ defmodule Orchestrator.FlydClientTest do
   @flyd_base_url "http://localhost:8080"
 
   setup do
-    # Ensure Finch is started
     start_supervised!({Finch, name: Orchestrator.Finch})
 
-    # Wait for flyd-sim to be ready
     wait_for_flyd_ready()
 
     :ok
@@ -19,7 +17,6 @@ defmodule Orchestrator.FlydClientTest do
 
   describe "migrate_machine/3" do
     setup do
-      # Create a test machine
       machine_id = create_test_machine("migration-test-#{:rand.uniform(10000)}", "us-east-1")
       {:ok, machine_id: machine_id}
     end
@@ -90,18 +87,15 @@ defmodule Orchestrator.FlydClientTest do
     end
 
     test "handles network timeout gracefully" do
-      # This test validates retry logic by using an invalid base URL
       original_base = Application.get_env(:orchestrator, :flyd)[:url]
       Application.put_env(:orchestrator, :flyd, url: "http://localhost:9999")
 
       assert {:error, :max_retries} = FlydClient.migrate_machine("test", "eu-west-1")
 
-      # Restore original config
       Application.put_env(:orchestrator, :flyd, url: original_base)
     end
 
     test "emits telemetry events on successful migration start", %{machine_id: machine_id} do
-      # Attach telemetry handler
       :telemetry.attach(
         "test-migration-start",
         [:orchestrator, :migration, :start],
@@ -221,13 +215,11 @@ defmodule Orchestrator.FlydClientTest do
 
       {:ok, stream_pid} = FlydClient.stream_migration_progress(migration_id, callback)
 
-      # Wait for at least one progress update
       assert_receive {:progress_update, update}, 10_000
 
       assert is_map(update)
       assert update["type"] in ["progress", "complete", "error"]
 
-      # Wait for completion or timeout
       receive do
         {:migration_complete, _final_state} ->
           :ok
@@ -236,11 +228,9 @@ defmodule Orchestrator.FlydClientTest do
           :ok
       after
         30_000 ->
-          # Migration didn't complete in time, but that's ok for this test
           :ok
       end
 
-      # Cleanup
       if Process.alive?(stream_pid), do: Process.exit(stream_pid, :kill)
     end
 
@@ -248,18 +238,15 @@ defmodule Orchestrator.FlydClientTest do
       callback = fn _update -> :ok end
       {:ok, _pid} = FlydClient.stream_migration_progress(migration_id, callback)
 
-      # Should eventually receive completion
       assert_receive {:migration_complete, event}, 30_000
       assert event["type"] == "complete"
       assert event["final_state"] in ["STATE_COMPLETED", "STATE_FAILED", "STATE_ROLLED_BACK"]
     end
 
     test "handles stream errors gracefully" do
-      # Use invalid migration ID
       callback = fn _update -> :ok end
       {:ok, _pid} = FlydClient.stream_migration_progress("invalid_migration_id", callback)
 
-      # Should receive error message
       assert_receive {:migration_error, _reason}, 5_000
     end
 
@@ -270,10 +257,8 @@ defmodule Orchestrator.FlydClientTest do
         capture_log(fn ->
           {:ok, pid} = FlydClient.stream_migration_progress(migration_id, callback)
 
-          # Wait a bit for stream to start
           Process.sleep(1000)
 
-          # Cleanup
           if Process.alive?(pid), do: Process.exit(pid, :kill)
           Process.sleep(100)
         end)
@@ -284,13 +269,10 @@ defmodule Orchestrator.FlydClientTest do
 
   describe "exponential backoff and retry logic" do
     test "retries on transient failures" do
-      # This is tested implicitly in the timeout test above
-      # The client should retry up to 4 times before giving up
       assert true
     end
 
     test "gives up after max retries" do
-      # Temporarily point to invalid endpoint
       original_base = Application.get_env(:orchestrator, :flyd)[:url]
       Application.put_env(:orchestrator, :flyd, url: "http://localhost:9999")
 
@@ -300,23 +282,19 @@ defmodule Orchestrator.FlydClientTest do
 
       assert {:error, :max_retries} = result
 
-      # Should have taken some time due to retries (at least 600ms: 100+200+300)
       assert end_time - start_time > 500
 
-      # Restore
       Application.put_env(:orchestrator, :flyd, url: original_base)
     end
   end
 
   describe "concurrent migrations" do
     test "handles multiple concurrent migration requests" do
-      # Create multiple machines
       machines =
         Enum.map(1..5, fn i ->
           create_test_machine("concurrent-#{i}-#{:rand.uniform(10000)}", "us-east-1")
         end)
 
-      # Start migrations concurrently
       tasks =
         Enum.map(machines, fn machine_id ->
           Task.async(fn ->
@@ -324,15 +302,12 @@ defmodule Orchestrator.FlydClientTest do
           end)
         end)
 
-      # Wait for all to complete
       results = Task.await_many(tasks, 30_000)
 
-      # All should succeed
       assert Enum.all?(results, fn result ->
                match?({:ok, _}, result)
              end)
 
-      # All should have unique migration IDs
       migration_ids = Enum.map(results, fn {:ok, resp} -> resp["migration_id"] end)
       assert length(Enum.uniq(migration_ids)) == 5
     end
@@ -342,17 +317,14 @@ defmodule Orchestrator.FlydClientTest do
     test "handles empty target region" do
       machine_id = create_test_machine("edge-case-#{:rand.uniform(10000)}", "us-east-1")
 
-      # The validation happens on the server side
       assert {:error, _} = FlydClient.migrate_machine(machine_id, "")
     end
 
     test "handles migration to same region" do
       machine_id = create_test_machine("same-region-#{:rand.uniform(10000)}", "us-east-1")
 
-      # Server should handle this - might be valid for some strategies
       result = FlydClient.migrate_machine(machine_id, "us-east-1")
 
-      # Either succeeds or returns meaningful error
       assert match?({:ok, _}, result) or match?({:error, _}, result)
     end
 
@@ -371,21 +343,15 @@ defmodule Orchestrator.FlydClientTest do
           metadata: large_metadata
         )
 
-      # Should either succeed or fail gracefully
       assert match?({:ok, _}, result) or match?({:error, _}, result)
     end
   end
 
   describe "SSE parsing" do
     test "parses valid SSE events" do
-      # Access private function via testing approach
-      # Since it's private, we test it indirectly through stream_migration_progress
-      # This is already covered in the streaming tests above
       assert true
     end
   end
-
-  # Helper functions
 
   defp wait_for_flyd_ready(retries \\ 30) do
     case make_http_request(:get, "/ping") do

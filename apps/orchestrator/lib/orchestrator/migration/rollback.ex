@@ -1,10 +1,9 @@
 defmodule Orchestrator.Migration.Rollback do
   require Logger
-  alias Orchestrator.{FlydClient, Repo}
+  alias Orchestrator.FlydClient
   @type rollback_strategy :: :immediate | :deferred | :partial | :complete
   @type rollback_result :: {:ok, map()} | {:error, term()}
   defmodule RollbackPlan do
-    @moduledoc false
     @enforce_keys [:migration_id, :strategy, :phase, :actions]
     defstruct [
       :migration_id,
@@ -36,7 +35,6 @@ defmodule Orchestrator.Migration.Rollback do
   end
 
   defmodule RollbackAction do
-    @moduledoc false
     @enforce_keys [:type, :params]
     defstruct [
       :type,
@@ -388,7 +386,6 @@ defmodule Orchestrator.Migration.Rollback do
       end
 
     duration_ms = System.monotonic_time(:millisecond) - start_time
-    action = %{action | duration_ms: duration_ms}
 
     case result do
       {:ok, _} = success ->

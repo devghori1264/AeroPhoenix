@@ -107,7 +107,7 @@ defmodule OrchestratorWeb.OptimizationController do
 
   def rollback_execution(conn, %{"execution_id" => execution_id} = params) do
     opts = parse_rollback_opts(params)
-    Logger.warn("Rollback requested", execution_id: execution_id)
+    Logger.warning("Rollback requested", execution_id: execution_id)
 
     case Executor.rollback_execution(execution_id, opts) do
       {:ok, result} ->

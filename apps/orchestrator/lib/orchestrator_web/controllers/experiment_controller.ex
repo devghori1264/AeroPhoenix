@@ -2,6 +2,8 @@ defmodule OrchestratorWeb.ExperimentController do
   use OrchestratorWeb, :controller
   alias Orchestrator.FeatureFlags
   alias Orchestrator.FeatureFlags.Experiment
+  alias Orchestrator.Repo
+
   action_fallback(OrchestratorWeb.FallbackController)
 
   def index(conn, params) do
@@ -23,7 +25,7 @@ defmodule OrchestratorWeb.ExperimentController do
 
       conn
       |> put_status(:created)
-      |> put_resp_header("location", ~p"/api/experiments/#{experiment.id}")
+      |> put_resp_header("location", ~p"/api/v1/experiments/#{experiment.id}")
       |> render(:show, experiment: experiment)
     end
   end

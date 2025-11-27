@@ -1,7 +1,7 @@
 defmodule Orchestrator.Manager do
   use GenServer
   require Logger
-  alias Orchestrator.{Repo, Machine, Client, Predictor}
+  alias Orchestrator.{Repo, Machine, Predictor, RegionRouter}
   import Ecto.Query, only: [from: 2]
 
   @predictor_table :orch_predictor
@@ -19,6 +19,32 @@ defmodule Orchestrator.Manager do
 
   def list_machines do
     Repo.all(Machine)
+  end
+
+  def update_machine_status(machine_id, new_status) do
+    case get_machine(machine_id) do
+      nil ->
+        {:error, :not_found}
+
+      machine ->
+        changeset = Ecto.Changeset.change(machine, status: new_status)
+        Repo.update(changeset)
+    end
+  end
+
+  def update_machine(%{id: id} = attrs) do
+    case get_machine(id) do
+      nil ->
+        {:error, :not_found}
+
+      machine ->
+        changeset = Machine.changeset(machine, attrs)
+        Repo.update(changeset)
+    end
+  end
+
+  def update_machine(attrs) when is_map(attrs) do
+    {:error, :missing_id}
   end
 
   def topology do
@@ -56,12 +82,14 @@ defmodule Orchestrator.Manager do
     |> :ets.whereis()
     |> case do
       :undefined ->
+        heir_pid = Process.whereis(Orchestrator.Supervisor) || self()
+
         :ets.new(@predictor_table, [
           :named_table,
           :public,
           :set,
-          read_concurrency: true,
-          heir: Process.whereis(Orchestrator.Supervisor)
+          {:read_concurrency, true},
+          {:heir, heir_pid, []}
         ])
 
         Logger.info("Predictor ETS table '#{@predictor_table}' created by Manager.")
@@ -111,7 +139,7 @@ defmodule Orchestrator.Manager do
   end
 
   defp handle_remote_creation(%Machine{} = machine, state) do
-    case Client.create_machine(machine.name, machine.region) do
+    case RegionRouter.create_machine(machine.name, machine.region) do
       {:ok, %{"id" => remote_id, "status" => remote_status}} ->
         Logger.info(
           "Remote machine created successfully for local ID #{machine.id}, remote ID: #{remote_id}"
@@ -129,6 +157,31 @@ defmodule Orchestrator.Manager do
           {:error, changeset} ->
             Logger.error(
               "Failed to update local machine #{machine.id} with remote ID: #{inspect(changeset.errors)}"
+            )
+
+            {:reply, {:error, :local_update_failed_after_remote_create}, state}
+        end
+
+      {:ok, response} ->
+        Logger.info(
+          "Remote machine created with non-standard response for local ID #{machine.id}: #{inspect(response)}"
+        )
+
+        remote_id = response["id"] || machine.name
+        remote_status = response["status"] || "running"
+
+        metadata = Map.put(machine.metadata || %{}, "remote_id", remote_id)
+
+        update_changeset =
+          Ecto.Changeset.change(machine, metadata: metadata, status: remote_status)
+
+        case Repo.update(update_changeset) do
+          {:ok, updated_machine} ->
+            {:reply, {:ok, updated_machine}, state}
+
+          {:error, changeset} ->
+            Logger.error(
+              "Failed to update local machine #{machine.id}: #{inspect(changeset.errors)}"
             )
 
             {:reply, {:error, :local_update_failed_after_remote_create}, state}
@@ -179,13 +232,13 @@ defmodule Orchestrator.Manager do
     end
   end
 
-  defp get_remote_state(%Machine{metadata: %{"remote_id" => remote_id}})
-       when not is_nil(remote_id) do
-    case Client.get_machine(remote_id) do
+  defp get_remote_state(%Machine{metadata: %{"remote_id" => remote_id}, region: region})
+       when not is_nil(remote_id) and not is_nil(region) do
+    case RegionRouter.get_machine(remote_id, region) do
       {:ok, %{"id" => _id, "status" => status}} ->
         {:ok, %{"remote_status" => status}}
 
-      {:error, {:http_error, 404}} ->
+      {:error, :not_found} ->
         {:error, :remote_not_found}
 
       {:error, reason} ->
@@ -316,7 +369,7 @@ defmodule Orchestrator.Manager do
   end
 
   defp handle_self_heal_recreate(%Machine{} = machine) do
-    case Client.create_machine(machine.name, machine.region) do
+    case RegionRouter.create_machine(machine.name, machine.region) do
       {:ok, %{"id" => new_remote_id, "status" => new_status}} ->
         Logger.info(
           "Self-heal successful: Recreated remote machine for local ID #{machine.id}, new remote ID: #{new_remote_id}",

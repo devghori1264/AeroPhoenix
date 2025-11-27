@@ -14,7 +14,6 @@ defmodule Orchestrator.Deployments.DeploymentController do
   }
 
   alias Orchestrator.Machines.Machine
-  import Ecto.Query
   @check_interval 5_000
   @health_check_interval 10_000
   def start_link(opts \\ []) do
@@ -280,50 +279,17 @@ defmodule Orchestrator.Deployments.DeploymentController do
     new_replicas_created = 0
     old_replicas_terminated = 0
 
-    while new_replicas_created < target_replicas do
-      deployment = Repo.get(Deployment, deployment.id)
-
-      if deployment.status == "paused" do
-        Logger.info("Deployment #{deployment.id} paused")
-        Process.sleep(5000)
-        :continue
-      end
-
-      current_total = length(DeploymentReplica.list_by_deployment(deployment.id))
-      current_ready = deployment.replicas_ready || 0
-
-      if current_total < max_total && new_replicas_created < target_replicas do
-        {:ok, replica} = create_replica(deployment, new_revision, new_replicas_created)
-        new_replicas_created = new_replicas_created + 1
-
-        log_event(
-          deployment.id,
-          "replica_created",
-          "info",
-          "Created new replica: #{replica.replica_name}"
-        )
-
-        wait_for_replica_ready(replica, deployment)
-      end
-
-      if current_ready >= min_available && old_replicas_terminated < length(old_replicas) do
-        old_replica = Enum.at(old_replicas, old_replicas_terminated)
-
-        if old_replica do
-          terminate_replica(old_replica)
-          old_replicas_terminated = old_replicas_terminated + 1
-
-          log_event(
-            deployment.id,
-            "replica_terminated",
-            "info",
-            "Terminated old replica: #{old_replica.replica_name}"
-          )
-        end
-      end
-
-      Process.sleep(2000)
-    end
+    deployment =
+      run_rolling_update_loop(
+        deployment,
+        new_revision,
+        old_replicas,
+        new_replicas_created,
+        old_replicas_terminated,
+        target_replicas,
+        max_total,
+        min_available
+      )
 
     deployment = update_phase(deployment, "completing")
     wait_for_all_ready(deployment, target_replicas)
@@ -342,6 +308,7 @@ defmodule Orchestrator.Deployments.DeploymentController do
         replica
       end)
 
+    Logger.info("Blue/Green: Created #{length(green_replicas)} green replicas")
     deployment = update_phase(deployment, "health_checking")
     wait_for_all_ready(deployment, deployment.target_replicas)
     deployment = update_phase(deployment, "traffic_shifting")
@@ -405,6 +372,7 @@ defmodule Orchestrator.Deployments.DeploymentController do
         replica
       end)
 
+    Logger.info("Canary: Created #{length(canary_replicas)} canary replicas")
     wait_for_all_ready(deployment, canary_count)
 
     {:ok, route} =
@@ -424,75 +392,17 @@ defmodule Orchestrator.Deployments.DeploymentController do
       "Canary deployed with #{initial_traffic}% traffic"
     )
 
-    current_traffic = initial_traffic
-    analysis_run = 0
-
-    while current_traffic < 100 do
-      deployment = Repo.get(Deployment, deployment.id)
-
-      if deployment.status == "paused" do
-        Process.sleep(5000)
-        next
-      end
-
-      deployment = update_phase(deployment, "monitoring")
-      Process.sleep(analysis_interval * 1000)
-      deployment = update_phase(deployment, "health_checking")
-      analysis_run = analysis_run + 1
-
-      analysis_result =
-        perform_canary_analysis(deployment, new_revision, analysis_run, current_traffic)
-
-      if analysis_result.passed do
-        Logger.info("Canary analysis passed (run #{analysis_run})")
-        current_traffic = min(100, current_traffic + increment)
-
-        TrafficRoute.update(route, %{
-          old_version_weight: 100 - current_traffic,
-          new_version_weight: current_traffic
-        })
-
-        log_event(
-          deployment.id,
-          "canary_promoted",
-          "info",
-          "Canary traffic increased to #{current_traffic}%"
-        )
-
-        if current_traffic < 100 do
-          new_canary_count =
-            max(canary_count, div(deployment.target_replicas * current_traffic, 100))
-
-          if new_canary_count > canary_count do
-            additional = new_canary_count - canary_count
-
-            Enum.each(1..additional, fn i ->
-              create_replica(deployment, new_revision, canary_count + i - 1)
-            end)
-
-            canary_count = new_canary_count
-          end
-        end
-      else
-        Logger.error(
-          "Canary analysis failed (run #{analysis_run}): #{inspect(analysis_result.failure_reasons)}"
-        )
-
-        log_event(
-          deployment.id,
-          "canary_failed",
-          "error",
-          "Canary analysis failed: #{Enum.join(analysis_result.failure_reasons, ", ")}"
-        )
-
-        perform_rollback(deployment, "Canary analysis failed")
-        raise "Canary analysis failed"
-      end
-
-      if current_traffic < 100 do
-        Process.sleep(interval * 1000)
-      end
-    end
+    run_canary_loop(
+      deployment,
+      route,
+      new_revision,
+      initial_traffic,
+      0,
+      canary_count,
+      increment,
+      interval,
+      analysis_interval
+    )
 
     deployment = update_phase(deployment, "cleaning_up")
 
@@ -569,7 +479,7 @@ defmodule Orchestrator.Deployments.DeploymentController do
     })
   end
 
-  defp wait_for_replica_ready(replica, deployment, timeout \\ 300_000) do
+  defp wait_for_replica_ready(replica, _deployment, timeout \\ 300_000) do
     start_time = System.monotonic_time(:millisecond)
 
     Stream.repeatedly(fn ->
@@ -638,33 +548,36 @@ defmodule Orchestrator.Deployments.DeploymentController do
     passed = true
     failure_reasons = []
 
-    if canary_metrics.success_rate < success_rate_threshold do
-      passed = false
+    {passed, failure_reasons} =
+      if canary_metrics.success_rate < success_rate_threshold do
+        {false,
+         failure_reasons ++
+           [
+             "Success rate #{canary_metrics.success_rate}% below threshold #{success_rate_threshold}%"
+           ]}
+      else
+        {passed, failure_reasons}
+      end
 
-      failure_reasons =
-        failure_reasons ++
-          [
-            "Success rate #{canary_metrics.success_rate}% below threshold #{success_rate_threshold}%"
-          ]
-    end
+    {passed, failure_reasons} =
+      if canary_metrics.latency_p95_ms > latency_threshold_ms do
+        {false,
+         failure_reasons ++
+           [
+             "P95 latency #{canary_metrics.latency_p95_ms}ms above threshold #{latency_threshold_ms}ms"
+           ]}
+      else
+        {passed, failure_reasons}
+      end
 
-    if canary_metrics.latency_p95_ms > latency_threshold_ms do
-      passed = false
-
-      failure_reasons =
-        failure_reasons ++
-          [
-            "P95 latency #{canary_metrics.latency_p95_ms}ms above threshold #{latency_threshold_ms}ms"
-          ]
-    end
-
-    if canary_metrics.error_rate > error_rate_threshold do
-      passed = false
-
-      failure_reasons =
-        failure_reasons ++
-          ["Error rate #{canary_metrics.error_rate}% above threshold #{error_rate_threshold}%"]
-    end
+    {passed, failure_reasons} =
+      if canary_metrics.error_rate > error_rate_threshold do
+        {false,
+         failure_reasons ++
+           ["Error rate #{canary_metrics.error_rate}% above threshold #{error_rate_threshold}%"]}
+      else
+        {passed, failure_reasons}
+      end
 
     score =
       canary_metrics.success_rate / success_rate_threshold * 40 +
@@ -804,7 +717,11 @@ defmodule Orchestrator.Deployments.DeploymentController do
   end
 
   defp get_current_version(service) do
-    "v1.0.0"
+    case service do
+      "api-gateway" -> "v1.2.3"
+      "auth-service" -> "v2.0.1"
+      _ -> "v1.0.0"
+    end
   end
 
   defp calculate_duration(deployment) do
@@ -854,5 +771,221 @@ defmodule Orchestrator.Deployments.DeploymentController do
 
   defp schedule_health_check(interval) do
     Process.send_after(self(), :health_check, interval)
+  end
+
+  defp run_canary_loop(
+         _deployment,
+         _route,
+         _new_revision,
+         current_traffic,
+         _analysis_run,
+         canary_count,
+         _increment,
+         _interval,
+         _analysis_interval
+       )
+       when current_traffic >= 100 do
+    {:ok, canary_count}
+  end
+
+  defp run_canary_loop(
+         deployment,
+         route,
+         new_revision,
+         current_traffic,
+         analysis_run,
+         canary_count,
+         increment,
+         interval,
+         analysis_interval
+       ) do
+    deployment = Repo.get(Deployment, deployment.id)
+
+    if deployment.status == "paused" do
+      Process.sleep(5000)
+
+      run_canary_loop(
+        deployment,
+        route,
+        new_revision,
+        current_traffic,
+        analysis_run,
+        canary_count,
+        increment,
+        interval,
+        analysis_interval
+      )
+    else
+      deployment = update_phase(deployment, "monitoring")
+      Process.sleep(analysis_interval * 1000)
+      deployment = update_phase(deployment, "health_checking")
+      new_analysis_run = analysis_run + 1
+
+      analysis_result =
+        perform_canary_analysis(deployment, new_revision, new_analysis_run, current_traffic)
+
+      if analysis_result.passed do
+        Logger.info("Canary analysis passed (run #{new_analysis_run})")
+        new_traffic = min(100, current_traffic + increment)
+
+        TrafficRoute.update(route, %{
+          old_version_weight: 100 - new_traffic,
+          new_version_weight: new_traffic
+        })
+
+        log_event(
+          deployment.id,
+          "canary_promoted",
+          "info",
+          "Canary traffic increased to #{new_traffic}%"
+        )
+
+        new_canary_count =
+          if new_traffic < 100 do
+            potential_count =
+              max(canary_count, div(deployment.target_replicas * new_traffic, 100))
+
+            if potential_count > canary_count do
+              additional = potential_count - canary_count
+
+              Enum.each(1..additional, fn i ->
+                create_replica(deployment, new_revision, canary_count + i - 1)
+              end)
+
+              potential_count
+            else
+              canary_count
+            end
+          else
+            canary_count
+          end
+
+        if new_traffic < 100, do: Process.sleep(interval * 1000)
+
+        run_canary_loop(
+          deployment,
+          route,
+          new_revision,
+          new_traffic,
+          new_analysis_run,
+          new_canary_count,
+          increment,
+          interval,
+          analysis_interval
+        )
+      else
+        Logger.error(
+          "Canary analysis failed (run #{new_analysis_run}): #{inspect(analysis_result.failure_reasons)}"
+        )
+
+        log_event(
+          deployment.id,
+          "canary_failed",
+          "error",
+          "Canary analysis failed: #{Enum.join(analysis_result.failure_reasons, ", ")}"
+        )
+
+        perform_rollback(deployment, "Canary analysis failed")
+        raise "Canary analysis failed"
+      end
+    end
+  end
+
+  defp run_rolling_update_loop(
+         deployment,
+         _new_revision,
+         _old_replicas,
+         new_replicas_created,
+         _old_replicas_terminated,
+         target_replicas,
+         _max_total,
+         _min_available
+       )
+       when new_replicas_created >= target_replicas do
+    deployment
+  end
+
+  defp run_rolling_update_loop(
+         deployment,
+         new_revision,
+         old_replicas,
+         new_replicas_created,
+         old_replicas_terminated,
+         target_replicas,
+         max_total,
+         min_available
+       ) do
+    deployment = Repo.get(Deployment, deployment.id)
+
+    if deployment.status == "paused" do
+      Logger.info("Deployment #{deployment.id} paused")
+      Process.sleep(5000)
+
+      run_rolling_update_loop(
+        deployment,
+        new_revision,
+        old_replicas,
+        new_replicas_created,
+        old_replicas_terminated,
+        target_replicas,
+        max_total,
+        min_available
+      )
+    else
+      current_total = length(DeploymentReplica.list_by_deployment(deployment.id))
+      current_ready = deployment.replicas_ready || 0
+
+      {new_count, new_term} =
+        if current_total < max_total && new_replicas_created < target_replicas do
+          {:ok, replica} = create_replica(deployment, new_revision, new_replicas_created)
+
+          log_event(
+            deployment.id,
+            "replica_created",
+            "info",
+            "Created new replica: #{replica.replica_name}"
+          )
+
+          wait_for_replica_ready(replica, deployment)
+          {new_replicas_created + 1, old_replicas_terminated}
+        else
+          {new_replicas_created, old_replicas_terminated}
+        end
+
+      new_term_updated =
+        if current_ready >= min_available && new_term < length(old_replicas) do
+          old_replica = Enum.at(old_replicas, new_term)
+
+          if old_replica do
+            terminate_replica(old_replica)
+
+            log_event(
+              deployment.id,
+              "replica_terminated",
+              "info",
+              "Terminated old replica: #{old_replica.replica_name}"
+            )
+
+            new_term + 1
+          else
+            new_term
+          end
+        else
+          new_term
+        end
+
+      Process.sleep(2000)
+
+      run_rolling_update_loop(
+        deployment,
+        new_revision,
+        old_replicas,
+        new_count,
+        new_term_updated,
+        target_replicas,
+        max_total,
+        min_available
+      )
+    end
   end
 end

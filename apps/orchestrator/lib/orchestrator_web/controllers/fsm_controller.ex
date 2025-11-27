@@ -2,7 +2,7 @@ defmodule OrchestratorWeb.FSMController do
   use OrchestratorWeb, :controller
   require Logger
   alias Orchestrator.{MachineFSM, Repo, Machine}
-  @doc "GET /api/fsm/:machine_id/state - Returns current FSM state with comprehensive metadata"
+
   def get_state(conn, %{"machine_id" => machine_id}) do
     case MachineFSM.get_state(machine_id) do
       {:ok, state} ->
@@ -18,7 +18,6 @@ defmodule OrchestratorWeb.FSMController do
     end
   end
 
-  @doc "GET /api/fsm/:machine_id/history - Returns complete state transition history"
   def get_history(conn, %{"machine_id" => machine_id}) do
     case MachineFSM.get_history(machine_id) do
       {:ok, history} ->
@@ -38,7 +37,6 @@ defmodule OrchestratorWeb.FSMController do
     end
   end
 
-  @doc "POST /api/fsm/:machine_id/health_check - Triggers immediate health check"
   def trigger_health_check(conn, %{"machine_id" => machine_id}) do
     case MachineFSM.trigger_health_check(machine_id) do
       :ok ->
@@ -54,7 +52,6 @@ defmodule OrchestratorWeb.FSMController do
     end
   end
 
-  @doc "GET /api/fsm/graph - Returns state machine graph in multiple formats (mermaid, dot, json)"
   def get_graph(conn, params) do
     format = Map.get(params, "format", "json")
 
@@ -77,7 +74,6 @@ defmodule OrchestratorWeb.FSMController do
     |> send_resp(200, graph)
   end
 
-  @doc "GET /api/fsm/stats - Returns aggregated FSM statistics across all machines"
   def get_stats(conn, _params) do
     stats = calculate_fsm_stats()
 
@@ -87,7 +83,6 @@ defmodule OrchestratorWeb.FSMController do
     })
   end
 
-  @doc "GET /api/fsm/:machine_id/timeline - Returns timeline view of machine lifecycle"
   def get_timeline(conn, %{"machine_id" => machine_id}) do
     case MachineFSM.get_history(machine_id) do
       {:ok, history} ->

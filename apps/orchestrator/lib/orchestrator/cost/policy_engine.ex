@@ -2,7 +2,7 @@ defmodule Orchestrator.Cost.PolicyEngine do
   use GenServer
   require Logger
   alias Orchestrator.{Repo, Machines}
-  alias Orchestrator.Cost.{ResourceUsage, RightsizingRecommendation}
+  alias Orchestrator.Cost.RightsizingRecommendation
   import Ecto.Query
 
   @type state :: %{
@@ -107,10 +107,6 @@ defmodule Orchestrator.Cost.PolicyEngine do
         case evaluate_policy(policy, acc_state) do
           {:ok, policy_actions} ->
             {acc_actions ++ policy_actions, acc_state}
-
-          {:error, reason} ->
-            Logger.warn("Policy #{policy.id} evaluation failed: #{inspect(reason)}")
-            {acc_actions, acc_state}
         end
       end)
 
@@ -157,27 +153,27 @@ defmodule Orchestrator.Cost.PolicyEngine do
   defp evaluate_policy(policy, state) do
     case policy.policy_type do
       "idle_shutdown" ->
-        evaluate_idle_shutdown_policy(policy)
+        evaluate_idle_shutdown_policy(policy, state)
 
       "auto_rightsizing" ->
-        evaluate_rightsizing_policy(policy)
+        evaluate_rightsizing_policy(policy, state)
 
       "budget_enforcement" ->
-        evaluate_budget_policy(policy)
+        evaluate_budget_policy(policy, state)
 
       "scheduled_action" ->
-        evaluate_scheduled_policy(policy)
+        evaluate_scheduled_policy(policy, state)
 
       "tag_based" ->
-        evaluate_tag_policy(policy)
+        evaluate_tag_policy(policy, state)
 
       unknown ->
-        Logger.warn("Unknown policy type: #{unknown}")
+        Logger.warning("Unknown policy type: #{unknown}")
         {:ok, []}
     end
   end
 
-  defp evaluate_idle_shutdown_policy(policy) do
+  defp evaluate_idle_shutdown_policy(policy, _state) do
     conditions = policy.conditions || %{}
     idle_hours = Map.get(conditions, "idle_hours", @idle_threshold_hours)
     cpu_threshold = Map.get(conditions, "cpu_threshold", 5.0)
@@ -215,7 +211,7 @@ defmodule Orchestrator.Cost.PolicyEngine do
     end
   end
 
-  defp evaluate_rightsizing_policy(policy) do
+  defp evaluate_rightsizing_policy(policy, _state) do
     conditions = policy.conditions || %{}
     min_savings = Decimal.new(Map.get(conditions, "min_monthly_savings", "10.0"))
     min_confidence = Map.get(conditions, "min_confidence", 0.7)
@@ -254,7 +250,7 @@ defmodule Orchestrator.Cost.PolicyEngine do
     {:ok, actions}
   end
 
-  defp evaluate_budget_policy(policy) do
+  defp evaluate_budget_policy(policy, _state) do
     conditions = policy.conditions || %{}
     threshold_percent = Map.get(conditions, "threshold_percent", 95)
 
@@ -295,7 +291,7 @@ defmodule Orchestrator.Cost.PolicyEngine do
     end
   end
 
-  defp evaluate_scheduled_policy(policy) do
+  defp evaluate_scheduled_policy(policy, _state) do
     conditions = policy.conditions || %{}
     schedule = Map.get(conditions, "schedule", %{})
 
@@ -318,10 +314,37 @@ defmodule Orchestrator.Cost.PolicyEngine do
     end
   end
 
-  defp evaluate_tag_policy(policy) do
+  defp evaluate_tag_policy(policy, _state) do
     conditions = policy.conditions || %{}
     required_tags = Map.get(conditions, "tags", %{})
-    {:ok, []}
+
+    query = "SELECT id, tags FROM machines WHERE status = 'started'"
+
+    case Repo.query(query) do
+      {:ok, result} ->
+        actions =
+          result.rows
+          |> Enum.filter(fn [_id, tags] ->
+            tags_map = tags || %{}
+            Enum.any?(required_tags, fn {k, v} -> Map.get(tags_map, k) != v end)
+          end)
+          |> Enum.map(fn [id, _tags] ->
+            %{
+              type: @action_tag,
+              target: id,
+              policy_id: policy.id,
+              policy_name: policy.name,
+              reason: "Missing required tags: #{inspect(required_tags)}",
+              metadata: %{tags: required_tags}
+            }
+          end)
+
+        {:ok, actions}
+
+      error ->
+        Logger.error("Failed to evaluate tag policy: #{inspect(error)}")
+        {:ok, []}
+    end
   end
 
   defp execute_action(action, state) do
@@ -370,7 +393,7 @@ defmodule Orchestrator.Cost.PolicyEngine do
     end
   rescue
     e ->
-      Logger.error("Shutdown action failed: #{Exception.message(e)}")
+      Logger.error("Shutdown action failed for #{action.target}: #{Exception.message(e)}")
       {:error, :shutdown_failed}
   end
 
@@ -393,12 +416,12 @@ defmodule Orchestrator.Cost.PolicyEngine do
     end
   rescue
     e ->
-      Logger.error("Rightsizing action failed: #{Exception.message(e)}")
+      Logger.error("Rightsizing action failed for #{action.target}: #{Exception.message(e)}")
       {:error, :rightsizing_failed}
   end
 
   defp perform_action(%{type: @action_alert} = action) do
-    Logger.warn("POLICY ALERT: #{action.reason}")
+    Logger.warning("POLICY ALERT: #{action.reason}")
     :ok
   end
 
@@ -411,7 +434,7 @@ defmodule Orchestrator.Cost.PolicyEngine do
     end
   rescue
     e ->
-      Logger.error("Tag action failed: #{Exception.message(e)}")
+      Logger.error("Tag action failed for #{action.target}: #{Exception.message(e)}")
       {:error, :tag_failed}
   end
 

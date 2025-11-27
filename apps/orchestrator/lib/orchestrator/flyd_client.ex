@@ -527,6 +527,122 @@ defmodule Orchestrator.FlydClient do
     end
   end
 
+  @spec destroy_machine(String.t(), String.t()) :: :ok | {:error, term()}
+  def destroy_machine(region, machine_id) do
+    with_circuit_breaker(:flyd_lifecycle, fn ->
+      call(:delete, "/v1/regions/#{region}/machines/#{machine_id}", %{})
+    end)
+    |> case do
+      {:ok, _} -> :ok
+      {:error, :not_implemented} -> {:error, :not_implemented}
+      error -> error
+    end
+  end
+
+  @spec get_region_capacity(String.t()) :: {:ok, map()} | {:error, term()}
+  def get_region_capacity(region) do
+    with_circuit_breaker(:flyd_read, fn ->
+      call(:get, "/v1/regions/#{region}/capacity")
+    end)
+  end
+
+  @spec ping_region(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def ping_region(source_region, target_region) do
+    with_circuit_breaker(:flyd_read, fn ->
+      call(:post, "/v1/regions/#{source_region}/ping", %{target: target_region})
+    end)
+  end
+
+  @spec get_machine_size(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def get_machine_size(region, machine_id) do
+    with_circuit_breaker(:flyd_read, fn ->
+      call(:get, "/v1/regions/#{region}/machines/#{machine_id}/size")
+    end)
+  end
+
+  @spec update_machine_config(String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def update_machine_config(region, machine_id, config) do
+    with_circuit_breaker(:flyd_write, fn ->
+      call(:patch, "/v1/regions/#{region}/machines/#{machine_id}/config", config)
+    end)
+  end
+
+  @spec update_machine_resources(String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def update_machine_resources(region, machine_id, resources) do
+    with_circuit_breaker(:flyd_write, fn ->
+      call(:patch, "/v1/regions/#{region}/machines/#{machine_id}/resources", resources)
+    end)
+  end
+
+  @spec update_machine_network(String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def update_machine_network(region, machine_id, network) do
+    with_circuit_breaker(:flyd_write, fn ->
+      call(:patch, "/v1/regions/#{region}/machines/#{machine_id}/network", network)
+    end)
+  end
+
+  @spec get_machine_memory_dump(String.t(), String.t()) :: {:ok, binary()} | {:error, term()}
+  def get_machine_memory_dump(region, machine_id) do
+    with_circuit_breaker(:flyd_read, fn ->
+      call(:get, "/v1/regions/#{region}/machines/#{machine_id}/memory")
+    end)
+  end
+
+  @spec get_machine_app_state(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def get_machine_app_state(region, machine_id) do
+    with_circuit_breaker(:flyd_read, fn ->
+      call(:get, "/v1/regions/#{region}/machines/#{machine_id}/app_state")
+    end)
+  end
+
+  @spec restore_machine_memory(String.t(), String.t(), binary()) :: :ok | {:error, term()}
+  def restore_machine_memory(region, machine_id, dump) do
+    with_circuit_breaker(:flyd_write, fn ->
+      call(:post, "/v1/regions/#{region}/machines/#{machine_id}/memory/restore", %{dump: dump})
+    end)
+    |> case do
+      {:ok, _} -> :ok
+      error -> error
+    end
+  end
+
+  @spec restore_machine_app_state(String.t(), String.t(), map()) :: :ok | {:error, term()}
+  def restore_machine_app_state(region, machine_id, state) do
+    with_circuit_breaker(:flyd_write, fn ->
+      call(:post, "/v1/regions/#{region}/machines/#{machine_id}/app_state/restore", state)
+    end)
+    |> case do
+      {:ok, _} -> :ok
+      error -> error
+    end
+  end
+
+  @spec get_critical_pages(String.t(), String.t()) ::
+          {:ok, list(non_neg_integer())} | {:error, term()}
+  def get_critical_pages(region, machine_id) do
+    with_circuit_breaker(:flyd_read, fn ->
+      call(:get, "/v1/regions/#{region}/machines/#{machine_id}/pages/critical")
+    end)
+    |> case do
+      {:ok, %{"pages" => pages}} -> {:ok, pages}
+      error -> error
+    end
+  end
+
+  @spec get_machine_state(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def get_machine_state(machine_id, opts \\ []) do
+    region = Keyword.get(opts, :region)
+
+    path =
+      if region,
+        do: "/v1/regions/#{region}/machines/#{machine_id}/state",
+        else: "/v1/machines/#{machine_id}/state"
+
+    with_circuit_breaker(:flyd_read, fn ->
+      call(:get, path)
+    end)
+  end
+
   defp with_circuit_breaker(circuit_name, fun) do
     case Process.whereis(CircuitBreaker) do
       nil ->

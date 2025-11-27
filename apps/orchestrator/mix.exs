@@ -8,7 +8,8 @@ defmodule Orchestrator.MixProject do
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      aliases: aliases()
+      aliases: aliases(),
+      releases: releases()
     ]
   end
 
@@ -49,7 +50,12 @@ defmodule Orchestrator.MixProject do
       {:opentelemetry, "~> 1.0"},
       {:opentelemetry_exporter, "~> 1.0"},
       {:retry, "~> 0.16"},
-      {:uuid, "~> 1.1"}
+      {:uuid, "~> 1.1"},
+      {:exqlite, "~> 0.16"},
+      {:jose, "~> 1.11"},
+      {:grpc, "~> 0.5.0"},
+      {:protobuf, "~> 0.10.0"},
+      {:uniq, "~> 0.6.0"}
     ]
   end
 
@@ -57,6 +63,15 @@ defmodule Orchestrator.MixProject do
     [
       "ecto.setup": ["ecto.create", "ecto.migrate"],
       "ecto.reset": ["ecto.drop", "ecto.setup"]
+    ]
+  end
+
+  defp releases do
+    [
+      orchestrator: [
+        include_executables_for: [:unix],
+        applications: [runtime_tools: :permanent]
+      ]
     ]
   end
 end

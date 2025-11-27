@@ -51,7 +51,6 @@ defmodule Orchestrator.Cost.Budget do
     timestamps()
   end
 
-  @doc false
   def changeset(budget, attrs) do
     budget
     |> cast(attrs, [

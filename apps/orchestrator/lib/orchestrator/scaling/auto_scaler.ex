@@ -12,7 +12,6 @@ defmodule Orchestrator.Scaling.AutoScaler do
   @default_prediction_window 300
   @default_confidence_threshold 0.8
   @min_training_samples 100
-  @arima_order {1, 1, 1}
   @smoothing_alpha 0.3
   @trend_detection_threshold 0.1
   def start_link(opts \\ []) do
@@ -211,7 +210,7 @@ defmodule Orchestrator.Scaling.AutoScaler do
     end
   end
 
-  defp reactive_scaling_decision(service, policy, current_metrics) do
+  defp reactive_scaling_decision(_service, policy, current_metrics) do
     cond do
       current_metrics.cpu_percent > policy.target_cpu_percent * 1.2 &&
           current_metrics.current_instances < policy.max_instances ->
@@ -247,7 +246,7 @@ defmodule Orchestrator.Scaling.AutoScaler do
     end
   end
 
-  defp scheduled_scaling_decision(service, policy, current_metrics) do
+  defp scheduled_scaling_decision(_service, policy, current_metrics) do
     now = DateTime.utc_now()
     hour = now.hour
     day_of_week = Date.day_of_week(DateTime.to_date(now))
@@ -388,14 +387,10 @@ defmodule Orchestrator.Scaling.AutoScaler do
 
     if can_scale?(last_scale, cooldown_seconds) do
       case execute_scaling(service, action, count, reason) do
-        {:ok, result} ->
+        {:ok, _result} ->
           state
           |> put_in([Access.key!(:last_scale_time), service], DateTime.utc_now())
           |> update_scaling_stats(action)
-
-        {:error, reason} ->
-          Logger.error("Scaling failed for #{service}: #{inspect(reason)}")
-          update_in(state.stats.errors, &(&1 + 1))
       end
     else
       elapsed =
@@ -425,11 +420,11 @@ defmodule Orchestrator.Scaling.AutoScaler do
 
   defp execute_scaling(service, :scale_out, count, reason) do
     Logger.info("SCALING OUT: #{service} +#{count} instances - #{reason}")
-    current_machines = Machine.list_by_service(service, state: "running")
+    current_machines = Machine.list_by_service(Orchestrator.Repo, service, state: "running")
     current_count = length(current_machines)
 
     results =
-      Enum.map(1..count, fn i ->
+      Enum.map(1..count, fn _i ->
         Machine.create(%{
           service: service,
           state: "provisioning",
@@ -461,7 +456,7 @@ defmodule Orchestrator.Scaling.AutoScaler do
 
   defp execute_scaling(service, :scale_in, count, reason) do
     Logger.info("SCALING IN: #{service} -#{count} instances - #{reason}")
-    current_machines = Machine.list_by_service(service, state: "running")
+    current_machines = Machine.list_by_service(Orchestrator.Repo, service, state: "running")
     current_count = length(current_machines)
 
     machines_to_remove =

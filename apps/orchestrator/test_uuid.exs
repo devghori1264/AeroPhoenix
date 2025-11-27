@@ -3,10 +3,11 @@ IO.puts("Input: #{uuid_string}")
 IO.inspect(uuid_string, label: "String")
 
 case Ecto.UUID.cast(uuid_string) do
-  {:ok, uuid} -> 
+  {:ok, uuid} ->
     IO.puts("Cast succeeded")
     IO.inspect(uuid, label: "Cast result")
     IO.inspect(is_binary(uuid), label: "Is binary")
+
   :error ->
     IO.puts("Cast failed")
 end

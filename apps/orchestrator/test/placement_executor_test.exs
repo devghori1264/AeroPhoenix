@@ -6,7 +6,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
 
   describe "apply_cost_optimization/2" do
     setup do
-      # Create test machines
       machine1 = insert_machine(%{region: "us-east-1", status: "running"})
       machine2 = insert_machine(%{region: "us-east-1", status: "running"})
       machine3 = insert_machine(%{region: "eu-west-1", status: "running"})
@@ -51,7 +50,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
 
       assert result.success
       refute result.dry_run
-      # May succeed or fail depending on MachineManager availability
       assert result.executed_count >= 0
     end
 
@@ -72,7 +70,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
 
     test "handles missing required fields in recommendations" do
       invalid = [
-        # Missing machine_id
         %{type: :consolidate}
       ]
 
@@ -129,7 +126,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
       placements = [
         %{
           machine_id: m1.id,
-          # Same as current region
           target_region: "us-east-1",
           latency_improvement_ms: 0
         }
@@ -156,12 +152,10 @@ defmodule Orchestrator.Placement.ExecutorTest do
         strategy: "stop_and_move"
       }
 
-      # This may fail if MachineManager is not available, but should validate first
       result = Executor.execute_placement(recommendation, validate: true)
 
       case result do
         {:ok, _} -> assert true
-        # Acceptable if infrastructure unavailable
         {:error, _reason} -> assert true
       end
     end
@@ -184,10 +178,8 @@ defmodule Orchestrator.Placement.ExecutorTest do
         target_region: "us-west-2"
       }
 
-      # Should attempt execution even with invalid machine_id
       result = Executor.execute_placement(recommendation, force: true, validate: false)
 
-      # Will fail during execution, but not validation
       assert {:error, _} = result
     end
   end
@@ -196,7 +188,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
     test "loads execution checkpoints and performs rollback" do
       execution_id = "exec_test123"
 
-      # Should handle missing checkpoints gracefully
       {:ok, result} = Executor.rollback_execution(execution_id)
 
       assert result.rolled_back_count >= 0
@@ -212,7 +203,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
         target_region: "us-west-2"
       }
 
-      # Private function testing through public API
       machine = insert_machine(%{region: "us-east-1", status: "running"})
 
       rec = Map.put(valid_rec, :machine_id, machine.id)
@@ -279,13 +269,11 @@ defmodule Orchestrator.Placement.ExecutorTest do
       {:ok, result} =
         Executor.apply_latency_optimization(placements,
           mode: :dry_run,
-          # 60 ops/minute = 1/second
           rate_limit: 60
         )
 
       duration_ms = result.duration_ms
 
-      # Should complete quickly in dry-run despite rate limit
       assert duration_ms < 10_000
     end
   end
@@ -316,7 +304,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
           validate: true
         )
 
-      # Checkpoint should be created (tested implicitly)
       assert true
     end
 
@@ -333,7 +320,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
           validate: true
         )
 
-      # Should execute without checkpoint
       case result do
         {:ok, _} -> assert true
         {:error, _} -> assert true
@@ -364,16 +350,13 @@ defmodule Orchestrator.Placement.ExecutorTest do
         type: :consolidate,
         machine_id: machine.id,
         target_host: "tiny_host",
-        # More than capacity
         machines_to_move: List.duplicate(machine.id, 100)
       }
 
-      # Validation should catch this
       result = Executor.apply_cost_optimization([recommendation], mode: :progressive)
 
       case result do
         {:error, {:validation_failed, _}} -> assert true
-        # Or execution fails
         {:ok, result} -> refute result.success
       end
     end
@@ -381,7 +364,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
 
   describe "integration scenarios" do
     test "complete cost optimization workflow" do
-      # Create overprovisioned machines
       machines =
         for i <- 1..3 do
           insert_machine(%{
@@ -391,7 +373,6 @@ defmodule Orchestrator.Placement.ExecutorTest do
           })
         end
 
-      # Rightsize all of them
       recommendations =
         Enum.map(machines, fn m ->
           %{
@@ -403,12 +384,10 @@ defmodule Orchestrator.Placement.ExecutorTest do
           }
         end)
 
-      # Dry-run first
       {:ok, dry_result} = Executor.apply_cost_optimization(recommendations, mode: :dry_run)
       assert dry_result.dry_run
       assert length(dry_result.actions) == 3
 
-      # Real execution
       {:ok, real_result} =
         Executor.apply_cost_optimization(recommendations,
           mode: :progressive,
@@ -416,25 +395,20 @@ defmodule Orchestrator.Placement.ExecutorTest do
         )
 
       assert is_map(real_result)
-      # May succeed or fail depending on infrastructure availability
     end
 
     test "complete latency optimization workflow" do
-      # Create machines in suboptimal regions
       machine1 = insert_machine(%{region: "eu-west-1", status: "running"})
       machine2 = insert_machine(%{region: "ap-south-1", status: "running"})
 
-      # Move to us-east-1 for better latency to US users
       placements = [
         %{machine_id: machine1.id, target_region: "us-east-1", latency_improvement_ms: 85},
         %{machine_id: machine2.id, target_region: "us-east-1", latency_improvement_ms: 165}
       ]
 
-      # Dry-run
       {:ok, dry_result} = Executor.apply_latency_optimization(placements, mode: :dry_run)
       assert dry_result.success
 
-      # Real execution with atomic mode (all or nothing)
       result =
         Executor.apply_latency_optimization(placements,
           mode: :atomic,
@@ -443,17 +417,14 @@ defmodule Orchestrator.Placement.ExecutorTest do
 
       case result do
         {:ok, res} ->
-          # If successful, both should execute
           assert is_map(res)
 
         {:error, _} ->
-          # If failed, rollback should occur
           assert true
       end
     end
   end
 
-  # Helper function to insert test machines
   defp insert_machine(attrs) do
     default_attrs = %{
       id: "m_#{:rand.uniform(999_999)}",

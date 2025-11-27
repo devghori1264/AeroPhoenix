@@ -2,7 +2,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   use GenServer
   require Logger
   alias Orchestrator.LiveMigration.{Checkpointer, StateTransfer, Cutover}
-  alias Orchestrator.{FlydClient, Manager, Repo}
+  alias Orchestrator.{FlydClient, Manager}
   alias Orchestrator.Reconciliation.Engine, as: ReconciliationEngine
   @type migration_id :: String.t()
   @type machine_id :: String.t()
@@ -101,6 +101,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
       freeze_threshold_ms: Keyword.get(opts, :freeze_threshold_ms, @freeze_threshold_ms),
       parallelism: Keyword.get(opts, :parallelism, @transfer_parallelism),
       verify_checksums: Keyword.get(opts, :verify_checksums, true),
+      checksum_algorithm: Keyword.get(opts, :checksum_algorithm, @checksum_algorithm),
       auto_rollback: Keyword.get(opts, :auto_rollback, true),
       preserve_ip: Keyword.get(opts, :preserve_ip, false),
       metadata: Keyword.get(opts, :metadata, %{})
@@ -337,6 +338,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
     phase_start = System.monotonic_time(:millisecond)
 
     case StateTransfer.transfer_incremental(
+           state.machine_id,
            state.checkpoint_id,
            state.source_region,
            state.target_region,
@@ -409,6 +411,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
     case FlydClient.pause_machine(state.source_region, state.machine_id) do
       :ok ->
         case StateTransfer.transfer_final(
+               state.machine_id,
                state.checkpoint_id,
                state.source_region,
                state.target_region,
@@ -606,6 +609,12 @@ defmodule Orchestrator.LiveMigration.Coordinator do
         duration = System.monotonic_time(:millisecond) - phase_start
         total_duration = DateTime.diff(DateTime.utc_now(), state.started_at, :millisecond)
 
+        :telemetry.execute(
+          [:orchestrator, :live_migration, :cleanup, :completed],
+          %{duration_ms: duration},
+          %{migration_id: state.migration_id}
+        )
+
         Logger.info("Live migration completed successfully",
           migration_id: state.migration_id,
           total_duration_ms: total_duration,
@@ -692,7 +701,11 @@ defmodule Orchestrator.LiveMigration.Coordinator do
         {:ok, size_bytes}
 
       error ->
-        Logger.warning("Could not determine machine size, using estimate")
+        Logger.warning("Could not determine machine size, using estimate",
+          error: error,
+          migration_id: state.migration_id
+        )
+
         {:ok, 1_073_741_824}
     end
   end
@@ -760,6 +773,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   end
 
   defp get_completed_migration_status(migration_id) do
+    Logger.debug("Querying completed migration status", migration_id: migration_id)
     {:error, :not_found}
   end
 

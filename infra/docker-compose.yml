@@ -16,6 +16,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - aerophoenix
 
   redis:
     image: redis:7
@@ -26,23 +28,50 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    networks:
+      - aerophoenix
 
   nats:
     image: nats:2.9.4
     ports:
       - "4222:4222"
       - "8222:8222"
+    networks:
+      - aerophoenix
+
+  orchestrator:
+    image: aerophoenix-orchestrator:latest
+    container_name: orchestrator
+    environment:
+      - DATABASE_URL=ecto://aerouser:aeropass@postgres:5432/aerophoenix_orch_dev
+      - SECRET_KEY_BASE=supersecretkeythatshouldbegeneratedinproduction
+      - PHX_HOST=localhost
+      - PORT=4000
+      - NATS_URL=nats://nats:4222
+      - REDIS_URL=redis://redis:6379
+      - MIX_ENV=prod
+    ports:
+      - "4000:4000"
+    depends_on:
+      - postgres
+      - redis
+      - nats
+    networks:
+      - aerophoenix
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
-      interval: 10s
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/api/v1/ping"]
+      interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 30s
+    labels:
+      service: "orchestrator"
+      tier: "control-plane"
 
 
   flyd-sim-us-east-1:
-    build:
-      context: ../apps/flyd-sim
-      dockerfile: Dockerfile
+    image: aerophoenix/flyd-sim:local
     container_name: flyd-sim-us-east-1
     environment:
       - NATS_URL=nats://nats:4222
@@ -59,16 +88,8 @@ services:
       - "8080:8080"
       - "9090:9090"
     depends_on:
-      postgres:
-        condition: service_healthy
-      nats:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/ping"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      - postgres
+      - nats
     restart: unless-stopped
     networks:
       - aerophoenix
@@ -78,9 +99,7 @@ services:
       tier: "compute"
 
   flyd-sim-eu-west-1:
-    build:
-      context: ../apps/flyd-sim
-      dockerfile: Dockerfile
+    image: aerophoenix/flyd-sim:local
     container_name: flyd-sim-eu-west-1
     environment:
       - NATS_URL=nats://nats:4222
@@ -93,20 +112,12 @@ services:
     volumes:
       - flyd_eu_west_1_data:/data
     ports:
-      - "50052:50052"
-      - "8081:8081"
-      - "9091:9091"
+      - "50052:50051"
+      - "8081:8080"
+      - "9091:9090"
     depends_on:
-      postgres:
-        condition: service_healthy
-      nats:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/ping"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      - postgres
+      - nats
     restart: unless-stopped
     networks:
       - aerophoenix
@@ -116,9 +127,7 @@ services:
       tier: "compute"
 
   flyd-sim-ap-south-1:
-    build:
-      context: ../apps/flyd-sim
-      dockerfile: Dockerfile
+    image: aerophoenix/flyd-sim:local
     container_name: flyd-sim-ap-south-1
     environment:
       - NATS_URL=nats://nats:4222
@@ -131,20 +140,12 @@ services:
     volumes:
       - flyd_ap_south_1_data:/data
     ports:
-      - "50053:50053"
-      - "8082:8082"
-      - "9092:9092"
+      - "50053:50051"
+      - "8082:8080"
+      - "9095:9090"
     depends_on:
-      postgres:
-        condition: service_healthy
-      nats:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/ping"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      - postgres
+      - nats
     restart: unless-stopped
     networks:
       - aerophoenix
@@ -154,9 +155,7 @@ services:
       tier: "compute"
 
   flyd-sim-us-west-2:
-    build:
-      context: ../apps/flyd-sim
-      dockerfile: Dockerfile
+    image: aerophoenix/flyd-sim:local
     container_name: flyd-sim-us-west-2
     environment:
       - NATS_URL=nats://nats:4222
@@ -169,20 +168,12 @@ services:
     volumes:
       - flyd_us_west_2_data:/data
     ports:
-      - "50054:50054"
-      - "8083:8083"
-      - "9094:9093"
+      - "50054:50051"
+      - "8083:8080"
+      - "9094:9090"
     depends_on:
-      postgres:
-        condition: service_healthy
-      nats:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8083/ping"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      - postgres
+      - nats
     restart: unless-stopped
     networks:
       - aerophoenix
@@ -192,7 +183,7 @@ services:
       tier: "compute"
 
   region-registry:
-    image: consul:1.16
+    image: consul:1.15
     container_name: region-registry
     command: agent -dev -ui -client=0.0.0.0 -bind=0.0.0.0
     environment:

@@ -36,7 +36,6 @@ defmodule Orchestrator.Metrics.AnomalyModel do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc false
   def changeset(model, attrs) do
     model
     |> cast(attrs, [
@@ -218,13 +217,7 @@ defmodule Orchestrator.Metrics.AnomalyModel do
     |> Repo.update()
   end
 
-  def fail_training(model, reason) do
-    model
-    |> change(state: "failed")
-    |> Repo.update()
-  end
-
-  def detect(model, metric_samples) do
+  def detect(model, _metric_samples) do
     model
     |> change(last_detection_at: DateTime.utc_now())
     |> Repo.update()

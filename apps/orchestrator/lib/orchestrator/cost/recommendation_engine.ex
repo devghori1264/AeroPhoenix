@@ -1,7 +1,7 @@
 defmodule Orchestrator.Cost.RecommendationEngine do
   require Logger
   alias Orchestrator.{Repo, Machines}
-  alias Orchestrator.Cost.{ResourceUsage, RightsizingRecommendation}
+  alias Orchestrator.Cost.RightsizingRecommendation
   import Ecto.Query
   @type machine_id :: String.t()
   @type region :: String.t()
@@ -16,7 +16,7 @@ defmodule Orchestrator.Cost.RecommendationEngine do
   @memory_upsize_threshold 85.0
   @idle_cpu_threshold 5.0
   @idle_memory_threshold 20.0
-  @idle_request_threshold 10
+
   @confidence_threshold 0.7
   @cost_savings_threshold 10.0
   @spec analyze_machine(machine_id()) :: analysis_result()
@@ -324,15 +324,10 @@ defmodule Orchestrator.Cost.RecommendationEngine do
   end
 
   defp calculate_cost_impact(current_config, recommended_config, region) do
-    current_cost =
-      Decimal.new(
-        "#{current_config.cpu * 50 + current_config.memory_mb / 1024 * 20 + current_config.storage_gb * 0.10}"
-      )
+    pricing = get_region_pricing(region)
 
-    recommended_cost =
-      Decimal.new(
-        "#{recommended_config.cpu * 50 + recommended_config.memory_mb / 1024 * 20 + recommended_config.storage_gb * 0.10}"
-      )
+    current_cost = calculate_monthly_cost(current_config, pricing)
+    recommended_cost = calculate_monthly_cost(recommended_config, pricing)
 
     monthly_savings = Decimal.sub(current_cost, recommended_cost)
 
@@ -351,20 +346,72 @@ defmodule Orchestrator.Cost.RecommendationEngine do
     }
   end
 
+  defp get_region_pricing(_region) do
+    %{
+      cpu_per_core: Decimal.new("50.00"),
+      memory_per_gb: Decimal.new("20.00"),
+      storage_per_gb: Decimal.new("0.10")
+    }
+  end
+
+  defp calculate_monthly_cost(config, pricing) do
+    cpu_cost = Decimal.mult(Decimal.new(config.cpu), pricing.cpu_per_core)
+
+    memory_gb = Decimal.div(Decimal.new(config.memory_mb), Decimal.new(1024))
+    memory_cost = Decimal.mult(memory_gb, pricing.memory_per_gb)
+
+    storage_cost = Decimal.mult(Decimal.new(config.storage_gb), pricing.storage_per_gb)
+
+    Decimal.add(Decimal.add(cpu_cost, memory_cost), storage_cost)
+  end
+
   defp calculate_confidence(usage_stats, cpu_rec, memory_rec) do
     data_point_score = min(1.0, usage_stats.data_points / (@min_data_points * 2))
 
-    cpu_variance =
-      abs(usage_stats.cpu.p95 - usage_stats.cpu.avg) / max(usage_stats.cpu.p95, 1.0)
+    cpu_change_ratio =
+      if usage_stats.avg_cpu > 0 do
+        abs(cpu_rec.recommended - usage_stats.avg_cpu) / usage_stats.avg_cpu
+      else
+        0.0
+      end
 
-    cpu_score = max(0.0, 1.0 - cpu_variance)
+    memory_change_ratio =
+      if usage_stats.avg_memory > 0 do
+        abs(memory_rec.recommended - usage_stats.avg_memory) / usage_stats.avg_memory
+      else
+        0.0
+      end
+
+    volatility_penalty =
+      if cpu_change_ratio > 2.0 or memory_change_ratio > 2.0 do
+        0.2
+      else
+        0.0
+      end
+
+    cpu_variance =
+      if usage_stats.avg_cpu > 0 do
+        usage_stats.std_dev_cpu / usage_stats.avg_cpu
+      else
+        0.0
+      end
 
     memory_variance =
-      abs(usage_stats.memory.p95 - usage_stats.memory.avg) / max(usage_stats.memory.p95, 1.0)
+      if usage_stats.avg_memory > 0 do
+        usage_stats.std_dev_memory / usage_stats.avg_memory
+      else
+        0.0
+      end
 
-    memory_score = max(0.0, 1.0 - memory_variance)
-    confidence = data_point_score * 0.4 + cpu_score * 0.3 + memory_score * 0.3
-    Float.round(confidence, 2)
+    cpu_variance_score = min(1.0, cpu_variance)
+    memory_variance_score = min(1.0, memory_variance)
+
+    base_score =
+      data_point_score * 0.4 + (1.0 - cpu_variance_score) * 0.3 +
+        (1.0 - memory_variance_score) * 0.3
+
+    max(0.1, base_score - volatility_penalty)
+    |> Float.round(2)
   end
 
   defp assess_risk(cpu_rec, memory_rec, confidence) do

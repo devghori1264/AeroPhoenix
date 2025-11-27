@@ -162,7 +162,15 @@ defmodule Orchestrator.Events.Reader do
           {:ok, %{rows: rows}} ->
             batches =
               Enum.map(rows, fn [batch_number, event_count, events_json] ->
-                {batch_number, Jason.decode!(events_json)}
+                events = Jason.decode!(events_json)
+
+                if length(events) != event_count do
+                  Logger.warning(
+                    "Batch #{batch_number} event count mismatch: expected #{event_count}, got #{length(events)}"
+                  )
+                end
+
+                {batch_number, events}
               end)
 
             {batches, {agg_id, size, batch_num + length(batches)}}

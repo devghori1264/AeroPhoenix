@@ -74,7 +74,9 @@ defmodule Orchestrator.Router do
 
       machine ->
         case Jason.decode(body) do
-          {:ok, %{"action" => action}} ->
+          {:ok, %{"action" => action} = payload} ->
+            perform_action(id, action, payload)
+
             Task.start(fn ->
               Logger.info("Performing action #{action} on machine #{id} (#{machine.name})")
 

@@ -1,5 +1,5 @@
 defmodule Orchestrator.Debugger.NetworkCapture do
-  use Bitwise
+  import Bitwise
   use GenServer
   require Logger
 
@@ -240,7 +240,7 @@ defmodule Orchestrator.Debugger.NetworkCapture do
             {:packet, 4},
             {:env,
              [
-               {'TCPDUMP_INTERFACE', String.to_charlist(state.options.interface)}
+               {~c"TCPDUMP_INTERFACE", String.to_charlist(state.options.interface)}
              ]}
           ]
         )

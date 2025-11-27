@@ -29,7 +29,6 @@ defmodule Orchestrator.AutoScalingTest do
         service_name: "test-service",
         strategy: :reactive,
         min_instances: 10,
-        # Invalid: max < min
         max_instances: 5
       }
 
@@ -42,10 +41,8 @@ defmodule Orchestrator.AutoScalingTest do
 
   describe "AutoScaler operations" do
     setup do
-      # Start AutoScaler
       {:ok, scaler} = AutoScaler.start_link([])
 
-      # Create test policy
       {:ok, policy} =
         %ScalingPolicy{}
         |> ScalingPolicy.changeset(%{
@@ -59,7 +56,6 @@ defmodule Orchestrator.AutoScalingTest do
         })
         |> Repo.insert()
 
-      # Create test machines
       {:ok, machine1} =
         %Machine{}
         |> Machine.changeset(%{
@@ -95,10 +91,8 @@ defmodule Orchestrator.AutoScalingTest do
     end
 
     test "evaluates scaling decision - reactive strategy", %{policy: policy} do
-      # Simulate high CPU utilization
       result = AutoScaler.evaluate_scaling(policy.service_name)
 
-      # Should return scaling decision
       assert Map.has_key?(result, :action)
       assert result.action in [:scale_out, :scale_in, :no_action, :prevented_by_cooldown]
     end
@@ -114,7 +108,6 @@ defmodule Orchestrator.AutoScalingTest do
           prediction_confidence_threshold: 0.7
         })
 
-      # Add historical metrics for prediction
       now = DateTime.utc_now()
 
       Enum.each(1..120, fn i ->
@@ -130,15 +123,12 @@ defmodule Orchestrator.AutoScalingTest do
 
       result = AutoScaler.evaluate_scaling("ml-service")
 
-      # Should have predictions
       assert Map.has_key?(result, :predictions) || Map.has_key?(result, :action)
     end
 
     test "prevents rapid scaling with cooldown", %{policy: policy, machine: _machine} do
-      # First scale action
       {:ok, decision1} = AutoScaler.scale_now(policy.service_name, :scale_out, "test trigger")
 
-      # Immediate second scale should be prevented by cooldown
       {:ok, decision2} = AutoScaler.scale_now(policy.service_name, :scale_out, "test trigger 2")
 
       assert decision2.action == :prevented_by_cooldown ||
@@ -154,7 +144,6 @@ defmodule Orchestrator.AutoScalingTest do
     end
 
     test "retrieves scaling history", %{policy: policy} do
-      # Create some scaling events
       {:ok, _event} =
         %ScalingEvent{}
         |> ScalingEvent.changeset(%{
@@ -196,19 +185,16 @@ defmodule Orchestrator.AutoScalingTest do
 
       result = AutoScaler.evaluate_scaling(policy.service_name)
 
-      # Should return action based on schedule
       assert Map.has_key?(result, :action)
     end
   end
 
   describe "ML prediction accuracy" do
     test "generates predictions with confidence scores" do
-      # Create historical data with trend
       service = "trend-service"
       now = DateTime.utc_now()
 
       Enum.each(1..200, fn i ->
-        # Increasing trend
         value = 50.0 + i * 0.1 + :rand.uniform(5) * 1.0
 
         %MetricSample{}
@@ -232,7 +218,6 @@ defmodule Orchestrator.AutoScalingTest do
 
       result = AutoScaler.evaluate_scaling(service)
 
-      # Should detect upward trend and predict scale out
       if Map.has_key?(result, :predictions) do
         assert Map.has_key?(result.predictions, :confidence)
         assert result.predictions.confidence >= 0.0

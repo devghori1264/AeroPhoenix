@@ -14,19 +14,15 @@ defmodule Orchestrator.ReplicationTest do
     test "manages region registry and leader election" do
       {:ok, coordinator} = Coordinator.start_link(replication_mode: :async)
 
-      # Register regions
       :ok = Coordinator.register_region("us-east-1", %{})
       :ok = Coordinator.register_region("us-west-1", %{})
       :ok = Coordinator.register_region("eu-west-1", %{})
 
-      # Wait for leader election
       Process.sleep(100)
 
-      # Verify leader elected
       leader = Coordinator.get_leader()
       assert leader in ["us-east-1", "us-west-1", "eu-west-1"]
 
-      # Verify region status
       status = Coordinator.get_region_status()
       assert map_size(status) == 3
 
@@ -34,7 +30,6 @@ defmodule Orchestrator.ReplicationTest do
                info.status == :healthy
              end)
 
-      # Unregister region
       :ok = Coordinator.unregister_region("eu-west-1")
       new_status = Coordinator.get_region_status()
       assert map_size(new_status) == 2
@@ -52,20 +47,16 @@ defmodule Orchestrator.ReplicationTest do
     test "performs leader election" do
       nodes = ["node1", "node2", "node3"]
 
-      # Start nodes
       {:ok, _} = RaftConsensus.start_link(node_id: "node1", cluster_nodes: ["node2", "node3"])
       {:ok, _} = RaftConsensus.start_link(node_id: "node2", cluster_nodes: ["node1", "node3"])
       {:ok, _} = RaftConsensus.start_link(node_id: "node3", cluster_nodes: ["node1", "node2"])
 
-      # Wait for election
       Process.sleep(500)
 
-      # Check states
       state1 = RaftConsensus.get_state("node1")
       state2 = RaftConsensus.get_state("node2")
       state3 = RaftConsensus.get_state("node3")
 
-      # Exactly one should be leader
       leaders =
         [state1, state2, state3]
         |> Enum.filter(&(&1.role == :leader))
@@ -76,17 +67,14 @@ defmodule Orchestrator.ReplicationTest do
     test "replicates log entries" do
       {:ok, _} = RaftConsensus.start_link(node_id: "leader", cluster_nodes: [])
 
-      # Wait for leader promotion
       Process.sleep(200)
 
-      # Append command
       {:ok, index} = RaftConsensus.append_command("leader", {:set, "key1", "value1"})
       assert index == 1
 
       {:ok, index2} = RaftConsensus.append_command("leader", {:set, "key2", "value2"})
       assert index2 == 2
 
-      # Verify state
       state = RaftConsensus.get_state("leader")
       assert state.log_length >= 2
     end
@@ -101,15 +89,12 @@ defmodule Orchestrator.ReplicationTest do
 
       assert CRDT.GCounter.value(counter) == 8
 
-      # Merge with another counter
       counter2 = CRDT.GCounter.new()
       counter2 = CRDT.GCounter.increment(counter2, "node1", 2)
       counter2 = CRDT.GCounter.increment(counter2, "node3", 7)
 
       merged = CRDT.GCounter.merge(counter, counter2)
 
-      # Should take max of each node
-      # max(5,2) + 3 + 7
       assert CRDT.GCounter.value(merged) == 15
     end
 
@@ -133,7 +118,6 @@ defmodule Orchestrator.ReplicationTest do
 
       merged = CRDT.LWWRegister.merge(reg1, reg2)
 
-      # Later timestamp should win
       assert CRDT.LWWRegister.value(merged) == "value2"
     end
 
@@ -160,7 +144,6 @@ defmodule Orchestrator.ReplicationTest do
       vc2 = CRDT.VectorClock.new()
       vc2 = CRDT.VectorClock.increment(vc2, "node2")
 
-      # Compare
       assert CRDT.VectorClock.compare(vc1, vc2) == :concurrent
 
       vc3 = CRDT.VectorClock.increment(vc1, "node2")
@@ -184,17 +167,14 @@ defmodule Orchestrator.ReplicationTest do
       {:ok, ack_count} =
         QuorumManager.write("test_key", "test_value", replicas, consistency: :strong)
 
-      # Should get majority acks (at least 2 out of 3)
       assert ack_count >= 2
     end
 
     test "handles quorum failure" do
-      # Only 1 replica (can't achieve majority quorum)
       replicas = ["replica1"]
 
       result = QuorumManager.read("test_key", replicas, consistency: :strong, timeout: 100)
 
-      # May succeed with eventual consistency but not strong
       assert match?({:error, :quorum_not_met}, result) or match?({:ok, _}, result)
     end
   end
@@ -207,14 +187,11 @@ defmodule Orchestrator.ReplicationTest do
           target_regions: ["us-west-1", "eu-west-1"]
         )
 
-      # Record changes
       StateSync.record_change("key1", :set, "value1")
       StateSync.record_change("key2", :set, "value2")
 
-      # Force sync
       :ok = StateSync.sync_now()
 
-      # Check stats
       stats = StateSync.get_stats()
       assert stats.changes_synced >= 0
     end

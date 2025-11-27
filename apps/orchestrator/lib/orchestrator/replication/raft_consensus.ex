@@ -5,7 +5,6 @@ defmodule Orchestrator.Replication.RaftConsensus do
   @election_timeout_max 300
   @heartbeat_interval 50
   defmodule State do
-    @moduledoc false
     defstruct [
       :current_term,
       :voted_for,
@@ -26,7 +25,6 @@ defmodule Orchestrator.Replication.RaftConsensus do
   end
 
   defmodule LogEntry do
-    @moduledoc false
     defstruct [:term, :index, :command]
   end
 
@@ -102,9 +100,9 @@ defmodule Orchestrator.Replication.RaftConsensus do
   def handle_call({:request_vote, request}, _from, state) do
     %{
       term: candidate_term,
-      candidate_id: candidate_id,
-      last_log_index: candidate_last_index,
-      last_log_term: candidate_last_term
+      candidate_id: _candidate_id,
+      last_log_index: _candidate_last_index,
+      last_log_term: _candidate_last_term
     } = request
 
     {reply, new_state} =
@@ -129,10 +127,10 @@ defmodule Orchestrator.Replication.RaftConsensus do
     %{
       term: leader_term,
       leader_id: leader_id,
-      prev_log_index: prev_index,
-      prev_log_term: prev_term,
-      entries: entries,
-      leader_commit: leader_commit
+      prev_log_index: _prev_index,
+      prev_log_term: _prev_term,
+      entries: _entries,
+      leader_commit: _leader_commit
     } = request
 
     {reply, new_state} =

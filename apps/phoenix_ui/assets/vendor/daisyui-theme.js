@@ -1,14 +1,9 @@
-/** 🌼
- *  @license MIT
- *  daisyUI bundle
- *  https://daisyui.com/
- */
 
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __moduleCache = /* @__PURE__ */ new WeakMap;
+var __moduleCache = new WeakMap;
 var __toCommonJS = (from) => {
   var entry = __moduleCache.get(from), desc;
   if (entry)

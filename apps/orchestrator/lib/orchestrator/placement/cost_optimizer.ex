@@ -1,12 +1,11 @@
 defmodule Orchestrator.Placement.CostOptimizer do
   require Logger
-  alias Orchestrator.{Repo, Machine, Host}
+  alias Orchestrator.{Repo, Machine}
   @cpu_weight 0.4
   @memory_weight 0.4
   @disk_weight 0.1
   @network_weight 0.1
   @consolidation_threshold 0.7
-  @fragmentation_penalty 0.2
   defstruct [
     :bin_packing_algorithm,
     :cost_model,
@@ -16,6 +15,22 @@ defmodule Orchestrator.Placement.CostOptimizer do
     :spot_instance_enabled,
     :reserved_capacity
   ]
+
+  def analyze_cost_savings(machines, options \\ []) do
+    {:ok, rightsizing} = recommend_rightsizing(options)
+    machine_ids = Enum.map(machines, & &1.id)
+    relevant_recs = Enum.filter(rightsizing, fn r -> r.machine_id in machine_ids end)
+
+    total_savings =
+      Enum.reduce(relevant_recs, Decimal.new("0.0"), fn r, acc ->
+        Decimal.add(acc, Decimal.from_float(r.potential_savings_usd))
+      end)
+
+    %{
+      recommendations: relevant_recs,
+      total_monthly_savings: total_savings
+    }
+  end
 
   def find_cost_optimal_placement(machine_spec, options \\ []) do
     optimizer = build_optimizer(options)
@@ -368,7 +383,7 @@ defmodule Orchestrator.Placement.CostOptimizer do
     []
   end
 
-  defp underutilized?(host, optimizer) do
+  defp underutilized?(host, _optimizer) do
     utilization = host.utilization.total_percent
     utilization < @consolidation_threshold
   end
@@ -426,7 +441,7 @@ defmodule Orchestrator.Placement.CostOptimizer do
     can_fit?(total_resources, target_host)
   end
 
-  defp calculate_host_cost(optimizer, host) do
+  defp calculate_host_cost(_optimizer, _host) do
     10.0
   end
 
@@ -472,7 +487,7 @@ defmodule Orchestrator.Placement.CostOptimizer do
     }
   end
 
-  defp calculate_sizing_savings(recommendation, machine) do
+  defp calculate_sizing_savings(recommendation, _machine) do
     case recommendation do
       :downsize -> 5.0
       :upsize -> -10.0
@@ -516,7 +531,7 @@ defmodule Orchestrator.Placement.CostOptimizer do
     ]
   end
 
-  defp find_candidate_hosts(resources, _options) do
+  defp find_candidate_hosts(_resources, _options) do
     [
       %{
         id: "host-1",
@@ -527,7 +542,7 @@ defmodule Orchestrator.Placement.CostOptimizer do
     ]
   end
 
-  defp provision_new_host(optimizer, resources) do
+  defp provision_new_host(_optimizer, _resources) do
     {:ok,
      %{
        id: "host-new-#{:rand.uniform(1000)}",

@@ -1,7 +1,7 @@
 import Config
 
 config :phoenix_ui, PhoenixUiWeb.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4000")],
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PHOENIX_UI_PORT") || "4002")],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
@@ -41,3 +41,15 @@ config :opentelemetry_exporter,
   otlp_endpoint: "http://localhost:4318",
   otlp_headers: [],
   otlp_compression: :gzip
+
+config :orchestrator, Orchestrator.Repo,
+  username: System.get_env("POSTGRES_USER", "aerouser"),
+  password: System.get_env("POSTGRES_PASSWORD", "aeropass"),
+  database: System.get_env("POSTGRES_DB", "aerophoenix_orch_dev"),
+  hostname: System.get_env("POSTGRES_HOST", "localhost"),
+  port: String.to_integer(System.get_env("POSTGRES_PORT", "5432")),
+  pool_size: 10
+
+config :orchestrator, :nats, url: System.get_env("NATS_URL", "nats://localhost:4222")
+
+System.put_env("TELEMETRY_PORT", "9570")

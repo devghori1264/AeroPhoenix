@@ -86,7 +86,7 @@ defmodule Orchestrator.Cost.UsageCollector do
       new_state = perform_collection(state)
       {:noreply, new_state}
     else
-      Logger.warn("Collection skipped - collector is paused")
+      Logger.warning("Collection skipped - collector is paused")
       {:noreply, state}
     end
   end
@@ -231,7 +231,10 @@ defmodule Orchestrator.Cost.UsageCollector do
     ResourceUsage.record_usage(machine.id, metrics)
   rescue
     e ->
-      Logger.warn("Failed to collect metrics for machine #{machine.id}: #{Exception.message(e)}")
+      Logger.warning(
+        "Failed to collect metrics for machine #{machine.id}: #{Exception.message(e)}"
+      )
+
       {:error, :collection_failed}
   end
 

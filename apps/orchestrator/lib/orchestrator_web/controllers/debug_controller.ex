@@ -130,7 +130,7 @@ defmodule OrchestratorWeb.DebugController do
     }
   end
 
-  defp fetch_machine_threads(machine, include_stacks) do
+  defp fetch_machine_threads(_machine, include_stacks) do
     base_threads = [
       %{
         tid: 1,
@@ -169,7 +169,7 @@ defmodule OrchestratorWeb.DebugController do
     end
   end
 
-  defp fetch_machine_connections(machine, listening_only, protocol_filter) do
+  defp fetch_machine_connections(_machine, listening_only, protocol_filter) do
     all_connections = [
       %{
         protocol: "tcp",
@@ -225,7 +225,7 @@ defmodule OrchestratorWeb.DebugController do
     end)
   end
 
-  defp fetch_machine_file_descriptors(machine, type_filter) do
+  defp fetch_machine_file_descriptors(_machine, type_filter) do
     all_fds = [
       %{fd: 0, type: "file", target: "/dev/stdin"},
       %{fd: 1, type: "file", target: "/dev/stdout"},

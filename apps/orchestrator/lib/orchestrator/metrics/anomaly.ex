@@ -25,7 +25,6 @@ defmodule Orchestrator.Metrics.Anomaly do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc false
   def changeset(anomaly, attrs) do
     anomaly
     |> cast(attrs, [

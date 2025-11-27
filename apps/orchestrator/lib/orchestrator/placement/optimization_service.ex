@@ -3,7 +3,6 @@ defmodule Orchestrator.Placement.OptimizationService do
   require Logger
   alias Orchestrator.{Repo, Machine}
   alias Orchestrator.Placement.{CostOptimizer, LatencyOptimizer, Executor}
-  alias Orchestrator.Events.Writer, as: EventWriter
   import Ecto.Query
 
   defstruct [
@@ -370,11 +369,11 @@ defmodule Orchestrator.Placement.OptimizationService do
              latency_failed: latency_res.failed_count
            }}
 
-        {error, _} ->
-          error
+        {{:error, reason}, _} ->
+          {:error, reason}
 
-        {_, error} ->
-          error
+        {_, {:error, reason}} ->
+          {:error, reason}
       end
     end
   end

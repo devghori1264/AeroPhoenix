@@ -88,14 +88,6 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
 
           schedule_checkpoint_cleanup(checkpoint_id)
           {:ok, checkpoint_id, metadata}
-
-        {:error, reason} ->
-          Logger.error("Failed to store checkpoint",
-            checkpoint_id: checkpoint_id,
-            reason: reason
-          )
-
-          {:error, {:storage_failed, reason}}
       end
     else
       {:error, reason} = error ->
@@ -301,7 +293,7 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
 
   defp restore_network_state(network_state, machine_id, target_region) do
     Logger.debug("Restoring network state", machine_id: machine_id)
-    FlydClient.restore_machine_network(target_region, machine_id, network_state)
+    FlydClient.restore_machine_network_state(target_region, machine_id, network_state)
   end
 
   defp restore_application_state(app_state, machine_id, target_region) do

@@ -1,5 +1,6 @@
 defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
   use Ecto.Migration
+
   def up do
     execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
@@ -22,6 +23,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     create_aggregation_triggers()
     enable_timescaledb_hypertables()
   end
+
   def down do
     execute("DROP MATERIALIZED VIEW IF EXISTS mv_daily_cost_summary CASCADE")
     execute("DROP MATERIALIZED VIEW IF EXISTS mv_resource_utilization CASCADE")
@@ -39,6 +41,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     execute("DROP TYPE IF EXISTS aggregation_level")
     execute("DROP TYPE IF EXISTS resource_type")
   end
+
   defp create_resource_type_enum do
     execute("""
     CREATE TYPE resource_type AS ENUM (
@@ -54,6 +57,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     )
     """)
   end
+
   defp create_aggregation_level_enum do
     execute("""
     CREATE TYPE aggregation_level AS ENUM (
@@ -65,6 +69,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     )
     """)
   end
+
   defp create_optimization_status_enum do
     execute("""
     CREATE TYPE optimization_status AS ENUM (
@@ -77,6 +82,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     )
     """)
   end
+
   defp create_resource_usage_table do
     create table(:resource_usage, primary_key: false) do
       add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
@@ -101,11 +107,13 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       add(:metadata, :map, default: %{})
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
+
     execute("""
     CREATE INDEX resource_usage_measured_at_idx
     ON resource_usage (measured_at DESC)
     """)
   end
+
   defp create_usage_aggregates_table do
     create table(:usage_aggregates, primary_key: false) do
       add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
@@ -140,12 +148,14 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       add(:sample_count, :integer, null: false)
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
+
     create(
       unique_index(:usage_aggregates, [:machine_id, :aggregation_level, :period_start],
         name: :usage_aggregates_unique_period_idx
       )
     )
   end
+
   defp create_cost_pricing_table do
     create table(:cost_pricing) do
       add(:region, :string, null: false)
@@ -164,12 +174,14 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       add(:metadata, :map, default: %{})
       timestamps()
     end
+
     create(
       unique_index(:cost_pricing, [:region, :resource_type, :effective_from],
         name: :cost_pricing_unique_idx
       )
     )
   end
+
   defp create_rightsizing_recommendations_table do
     create table(:rightsizing_recommendations, primary_key: false) do
       add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
@@ -201,6 +213,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       timestamps()
     end
   end
+
   defp create_idle_resources_table do
     create table(:idle_resources, primary_key: false) do
       add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
@@ -225,6 +238,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       timestamps()
     end
   end
+
   defp create_budgets_table do
     create table(:budgets) do
       add(:name, :string, null: false)
@@ -248,6 +262,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       timestamps()
     end
   end
+
   defp create_budget_alerts_table do
     create table(:budget_alerts, primary_key: false) do
       add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
@@ -270,6 +285,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
   end
+
   defp create_cost_allocation_tags_table do
     create table(:cost_allocation_tags) do
       add(:tag_key, :string, null: false)
@@ -284,12 +300,14 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       add(:valid_until, :utc_datetime)
       timestamps()
     end
+
     create(
       unique_index(:cost_allocation_tags, [:machine_id, :tag_key, :valid_from],
         name: :cost_allocation_tags_unique_idx
       )
     )
   end
+
   defp create_optimization_policies_table do
     create table(:optimization_policies) do
       add(:name, :string, null: false)
@@ -314,6 +332,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       timestamps()
     end
   end
+
   defp create_cost_reports_table do
     create table(:cost_reports, primary_key: false) do
       add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
@@ -346,6 +365,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
   end
+
   defp create_indexes do
     create(index(:resource_usage, [:machine_id, :measured_at]))
     create(index(:resource_usage, [:region, :measured_at]))
@@ -373,6 +393,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     create(index(:cost_reports, [:scope_type, :scope_value]))
     create(index(:cost_reports, [:generated_at]))
   end
+
   defp create_materialized_views do
     execute("""
     CREATE MATERIALIZED VIEW mv_daily_cost_summary AS
@@ -388,7 +409,9 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     FROM resource_usage ru
     GROUP BY date_trunc('day', ru.measured_at), ru.region
     """)
+
     create(unique_index(:mv_daily_cost_summary, [:cost_date, :region]))
+
     execute("""
     CREATE MATERIALIZED VIEW mv_resource_utilization AS
     SELECT
@@ -405,8 +428,10 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     WHERE measured_at > NOW() - INTERVAL '7 days'
     GROUP BY machine_id, region
     """)
+
     create(unique_index(:mv_resource_utilization, [:machine_id]))
   end
+
   defp create_cost_functions do
     execute("""
     CREATE OR REPLACE FUNCTION calculate_resource_cost(
@@ -434,6 +459,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     END;
     $$ LANGUAGE plpgsql STABLE;
     """)
+
     execute("""
     CREATE OR REPLACE FUNCTION detect_idle_resources(
       p_lookback_hours INTEGER DEFAULT 24,
@@ -461,6 +487,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     END;
     $$ LANGUAGE plpgsql STABLE;
     """)
+
     execute("""
     CREATE OR REPLACE FUNCTION refresh_cost_analytics_views()
     RETURNS void AS $$
@@ -471,6 +498,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     $$ LANGUAGE plpgsql;
     """)
   end
+
   defp create_aggregation_triggers do
     execute("""
     CREATE OR REPLACE FUNCTION mark_idle_resource()
@@ -485,6 +513,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     END;
     $$ LANGUAGE plpgsql;
     """)
+
     execute("""
     CREATE TRIGGER trigger_mark_idle_resource
     BEFORE INSERT ON resource_usage
@@ -492,6 +521,7 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
     EXECUTE FUNCTION mark_idle_resource();
     """)
   end
+
   defp enable_timescaledb_hypertables do
     execute("""
     SELECT create_hypertable(
@@ -501,15 +531,18 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
       if_not_exists => TRUE
     )
     """)
+
     execute("""
     ALTER TABLE resource_usage SET (
       timescaledb.compress,
       timescaledb.compress_segmentby = 'machine_id,region'
     )
     """)
+
     execute("""
     SELECT add_compression_policy('resource_usage', INTERVAL '7 days')
     """)
+
     execute("""
     SELECT add_retention_policy('resource_usage', INTERVAL '90 days')
     """)

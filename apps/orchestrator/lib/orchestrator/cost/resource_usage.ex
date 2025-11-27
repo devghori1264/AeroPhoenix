@@ -3,6 +3,7 @@ defmodule Orchestrator.Cost.ResourceUsage do
   import Ecto.Changeset
   import Ecto.Query
   alias Orchestrator.Repo
+  require Logger
 
   @type t :: %__MODULE__{
           id: binary(),
@@ -52,7 +53,6 @@ defmodule Orchestrator.Cost.ResourceUsage do
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 
-  @doc false
   def changeset(usage, attrs) do
     usage
     |> cast(attrs, [
@@ -118,6 +118,8 @@ defmodule Orchestrator.Cost.ResourceUsage do
     cpu_threshold = Keyword.get(opts, :cpu_threshold, 5.0)
     memory_threshold = Keyword.get(opts, :memory_threshold, 20.0)
     hours = Keyword.get(opts, :hours, 24)
+
+    Logger.debug("Finding idle machines (CPU < #{cpu_threshold}%, Memory < #{memory_threshold}%)")
 
     from(u in __MODULE__,
       where: u.measured_at > ago(^hours, "hour"),

@@ -7,8 +7,6 @@ defmodule Orchestrator.FeatureFlags do
     TargetingRule,
     Override,
     Experiment,
-    ExperimentResult,
-    Evaluation,
     Engine,
     ExperimentAnalyzer
   }
@@ -62,7 +60,6 @@ defmodule Orchestrator.FeatureFlags do
     |> Enum.map(fn key ->
       case evaluate(key, context) do
         {:ok, value} -> {key, value}
-        {:error, _} -> {key, nil}
       end
     end)
     |> Map.new()
@@ -194,7 +191,7 @@ defmodule Orchestrator.FeatureFlags do
     )
   end
 
-  def get_flag_statistics(flag_key, period \\ :last_7_days) do
+  def get_flag_statistics(flag_key, _period \\ :last_7_days) do
     query = """
     SELECT * FROM flag_statistics
     WHERE flag_key = $1

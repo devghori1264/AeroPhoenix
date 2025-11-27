@@ -3,7 +3,6 @@ defmodule Orchestrator.FeatureFlags.ExperimentAnalyzer do
   alias Orchestrator.Repo
   alias Orchestrator.FeatureFlags.{Experiment, ExperimentResult, Statistics}
   alias Decimal, as: D
-  import Ecto.Query
   @default_confidence_level 95
   @default_minimum_sample_size 100
   @early_stopping_threshold 0.99
@@ -204,37 +203,37 @@ defmodule Orchestrator.FeatureFlags.ExperimentAnalyzer do
 
     if !control do
       Logger.warning("No control variation found for experiment #{experiment.id}")
-      return({:ok, %{winner: nil, comparisons: []}})
+      {:ok, %{winner: nil, comparisons: []}}
+    else
+      control_metric = Enum.find(control.metrics, fn m -> m.metric_name == primary_metric end)
+
+      comparisons =
+        results
+        |> Enum.filter(fn r -> r.variation_key != "control" end)
+        |> Enum.map(fn variation ->
+          variation_metric =
+            Enum.find(variation.metrics, fn m -> m.metric_name == primary_metric end)
+
+          compare_to_control(
+            variation.variation_key,
+            control_metric,
+            variation_metric,
+            experiment.confidence_level || @default_confidence_level
+          )
+        end)
+
+      winner =
+        comparisons
+        |> Enum.filter(fn c -> c.is_significant && D.to_float(c.relative_improvement) > 0 end)
+        |> Enum.max_by(fn c -> D.to_float(c.relative_improvement) end, fn -> nil end)
+
+      {:ok,
+       %{
+         control: control_metric,
+         winner: winner,
+         comparisons: comparisons
+       }}
     end
-
-    control_metric = Enum.find(control.metrics, fn m -> m.metric_name == primary_metric end)
-
-    comparisons =
-      results
-      |> Enum.filter(fn r -> r.variation_key != "control" end)
-      |> Enum.map(fn variation ->
-        variation_metric =
-          Enum.find(variation.metrics, fn m -> m.metric_name == primary_metric end)
-
-        compare_to_control(
-          variation.variation_key,
-          control_metric,
-          variation_metric,
-          experiment.confidence_level || @default_confidence_level
-        )
-      end)
-
-    winner =
-      comparisons
-      |> Enum.filter(fn c -> c.is_significant && D.to_float(c.relative_improvement) > 0 end)
-      |> Enum.max_by(fn c -> D.to_float(c.relative_improvement) end, fn -> nil end)
-
-    {:ok,
-     %{
-       control: control_metric,
-       winner: winner,
-       comparisons: comparisons
-     }}
   end
 
   defp compare_to_control(variation_key, control_metric, variation_metric, confidence_level) do
@@ -266,9 +265,10 @@ defmodule Orchestrator.FeatureFlags.ExperimentAnalyzer do
       variation_conversion_rate: variation_metric.conversion_rate,
       relative_improvement: relative_improvement,
       p_value: test_result.p_value,
-      is_significant: test_result.is_significant,
+      is_significant: test_result.p_value < 1.0 - D.to_float(confidence_level) / 100.0,
       bayesian_probability: bayesian_prob,
-      chi_square: test_result.chi_square
+      chi_square: test_result.chi_square,
+      sample_size: D.to_integer(variation_metric.sample_size)
     }
   end
 
@@ -323,7 +323,7 @@ defmodule Orchestrator.FeatureFlags.ExperimentAnalyzer do
 
   defp sufficient_sample_size?(experiment, winner) do
     min_size = experiment.minimum_sample_size || @default_minimum_sample_size
-    true
+    winner.sample_size >= min_size
   end
 
   defp experiment_too_long?(experiment) do
@@ -339,7 +339,7 @@ defmodule Orchestrator.FeatureFlags.ExperimentAnalyzer do
     min_size = experiment.minimum_sample_size || @default_minimum_sample_size
 
     Enum.all?(comparisons, fn c ->
-      true
+      c.sample_size >= min_size
     end)
   end
 

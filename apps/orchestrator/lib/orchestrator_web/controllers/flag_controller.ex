@@ -16,7 +16,7 @@ defmodule OrchestratorWeb.FlagController do
         {:error, :not_found}
 
       flag ->
-        flag = Repo.preload(flag, [:targeting_rules, :overrides, :experiments])
+        flag = Orchestrator.Repo.preload(flag, [:targeting_rules, :overrides, :experiments])
         render(conn, :show, flag: flag)
     end
   end
@@ -25,7 +25,7 @@ defmodule OrchestratorWeb.FlagController do
     with {:ok, %Flag{} = flag} <- FeatureFlags.create_flag(flag_params) do
       conn
       |> put_status(:created)
-      |> put_resp_header("location", ~p"/api/flags/#{flag.id}")
+      |> put_resp_header("location", ~p"/api/v1/flags/#{flag.id}")
       |> render(:show, flag: flag)
     end
   end

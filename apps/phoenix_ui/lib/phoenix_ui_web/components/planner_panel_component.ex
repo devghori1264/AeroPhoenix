@@ -2,9 +2,9 @@ defmodule PhoenixUiWeb.PlannerPanelComponent do
   use Phoenix.Component
   import PhoenixUiWeb.CoreComponents
 
-  attr :selected_machine, :map, default: nil
-  attr :recommendations, :list, default: []
-  attr :class, :string, default: ""
+  attr(:selected_machine, :map, default: nil)
+  attr(:recommendations, :list, default: [])
+  attr(:class, :string, default: "")
 
   def render(assigns) do
     ~H"""

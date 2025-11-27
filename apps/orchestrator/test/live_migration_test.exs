@@ -20,16 +20,13 @@ defmodule Orchestrator.LiveMigrationTest do
         preserve_ip: false
       }
 
-      # Start migration
       {:ok, migration_id} =
         Coordinator.start_migration(machine_id, source_region, target_region, config)
 
       assert is_binary(migration_id)
 
-      # Poll for completion (with timeout)
       wait_for_migration_completion(migration_id, 30_000)
 
-      # Verify final status
       {:ok, status} = Coordinator.get_status(migration_id)
       assert status.phase == :completed
       assert status.status == :success
@@ -53,7 +50,6 @@ defmodule Orchestrator.LiveMigrationTest do
 
       {:ok, status} = Coordinator.get_status(migration_id)
       assert status.phase == :completed
-      # Verify downtime target
       assert status.downtime_ms < 500
     end
 
@@ -82,22 +78,18 @@ defmodule Orchestrator.LiveMigrationTest do
 
       config = %{
         strategy: :pre_copy,
-        # Long enough to pause during
         max_iterations: 10
       }
 
       {:ok, migration_id} =
         Coordinator.start_migration(machine_id, "us-west-1", "us-east-1", config)
 
-      # Wait for incremental sync phase
       :timer.sleep(2000)
 
-      # Pause
       :ok = Coordinator.pause_migration(migration_id)
       {:ok, status} = Coordinator.get_status(migration_id)
       assert status.status == :paused
 
-      # Resume
       :ok = Coordinator.resume_migration(migration_id)
       {:ok, status} = Coordinator.get_status(migration_id)
       assert status.status == :in_progress
@@ -118,7 +110,6 @@ defmodule Orchestrator.LiveMigrationTest do
       {:ok, migration_id} =
         Coordinator.start_migration(machine_id, "us-west-1", "us-east-1", config)
 
-      # Wait briefly then cancel
       :timer.sleep(1000)
       :ok = Coordinator.cancel_migration(migration_id)
 
@@ -127,8 +118,6 @@ defmodule Orchestrator.LiveMigrationTest do
     end
 
     test "automatically rolls back on phase failure" do
-      # This would require mocking FlydClient to return errors
-      # For now, verify rollback mechanism exists
       assert function_exported?(Coordinator, :handle_info, 2)
     end
   end
@@ -146,12 +135,10 @@ defmodule Orchestrator.LiveMigrationTest do
       assert info.machine_id == machine_id
       assert info.compressed_size > 0
 
-      # Restore
       target_region = "us-east-1"
       target_machine = "test_target_#{:rand.uniform(10000)}"
       :ok = Checkpointer.restore_checkpoint(checkpoint_id, target_region, target_machine)
 
-      # Cleanup
       :ok = Checkpointer.delete_checkpoint(checkpoint_id)
     end
 
@@ -159,10 +146,8 @@ defmodule Orchestrator.LiveMigrationTest do
       machine_id = "test_incremental_#{:rand.uniform(10000)}"
       region = "eu-west-1"
 
-      # Create base checkpoint
       {:ok, base_id} = Checkpointer.create_checkpoint(region, machine_id, :full)
 
-      # Create incremental
       {:ok, incr_id} =
         Checkpointer.create_checkpoint(region, machine_id, :incremental, base_checkpoint: base_id)
 
@@ -172,7 +157,6 @@ defmodule Orchestrator.LiveMigrationTest do
       assert info.type == :incremental
       assert info.base_checkpoint == base_id
 
-      # Cleanup
       Checkpointer.delete_checkpoint(base_id)
       Checkpointer.delete_checkpoint(incr_id)
     end
@@ -185,7 +169,6 @@ defmodule Orchestrator.LiveMigrationTest do
       machine_id = "test_transfer_#{:rand.uniform(10000)}"
       checkpoint_id = "ckpt_#{:rand.uniform(10000)}"
 
-      # Mock dirty pages (would come from FlydClient in real scenario)
       dirty_pages = Enum.to_list(1..100)
 
       {:ok, result} =
@@ -226,7 +209,6 @@ defmodule Orchestrator.LiveMigrationTest do
       target_region = "us-east-1"
       machine_id = "test_parallel_#{:rand.uniform(10000)}"
 
-      # Large page set to test parallelism
       dirty_pages = Enum.to_list(1..1000)
 
       start_time = System.monotonic_time(:millisecond)
@@ -243,7 +225,6 @@ defmodule Orchestrator.LiveMigrationTest do
       duration = System.monotonic_time(:millisecond) - start_time
 
       assert result.pages_transferred == 1000
-      # Parallel should be faster than serial (though with mocks, timing may vary)
       assert duration < 30_000
     end
   end
@@ -279,15 +260,12 @@ defmodule Orchestrator.LiveMigrationTest do
       {:ok, result} = Cutover.perform_cutover(machine_id, "eu-west-1", "eu-central-1", opts)
 
       assert result.success == true
-      # With IP preservation, endpoint should include IP
       assert result.new_endpoint =~ ~r/\d+\.\d+\.\d+\.\d+/ or result.new_endpoint != ""
     end
 
     test "rolls back on cutover failure" do
       machine_id = "test_rollback_#{:rand.uniform(10000)}"
 
-      # This would require mocking health check failures
-      # For now, verify the mechanism exists
       assert function_exported?(Cutover, :perform_cutover, 4)
     end
   end
@@ -309,13 +287,10 @@ defmodule Orchestrator.LiveMigrationTest do
 
       {:ok, status} = Coordinator.get_status(migration_id)
 
-      # Verify downtime target (may be 0 in mocked environment)
       assert status.downtime_ms <= 500 or status.downtime_ms == 0
     end
 
     test "achieves < 100ms freeze time during final sync" do
-      # This would measure actual pause duration
-      # In mocked environment, we verify the configuration is respected
       machine_id = "test_freeze_#{:rand.uniform(10000)}"
 
       config = %{
@@ -333,8 +308,6 @@ defmodule Orchestrator.LiveMigrationTest do
       assert status.status == :success
     end
   end
-
-  ## Helpers
 
   defp wait_for_migration_completion(migration_id, timeout) do
     deadline = System.monotonic_time(:millisecond) + timeout

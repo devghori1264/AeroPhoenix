@@ -12,7 +12,10 @@ defmodule PhoenixUiWeb.NatsClient do
 
   def init(_) do
     try do
-      case :gnat.start_link(%{host: @nats_url}) do
+      uri = URI.parse(@nats_url)
+      opts = %{host: uri.host, port: uri.port || 4222}
+
+      case Gnat.start_link(opts) do
         {:ok, conn} ->
           Process.monitor(conn)
           Logger.info("NATS client connected successfully")
@@ -37,7 +40,7 @@ defmodule PhoenixUiWeb.NatsClient do
 
       pid ->
         try do
-          :ok = :gnat.pub(pid, subject, Jason.encode!(payload))
+          :ok = Gnat.pub(pid, subject, Jason.encode!(payload))
           {:reply, :ok, conn}
         rescue
           UndefinedFunctionError ->
@@ -54,7 +57,10 @@ defmodule PhoenixUiWeb.NatsClient do
 
   def handle_info(:reconnect, _state) do
     try do
-      case :gnat.start_link(%{host: @nats_url}) do
+      uri = URI.parse(@nats_url)
+      opts = %{host: uri.host, port: uri.port || 4222}
+
+      case Gnat.start_link(opts) do
         {:ok, conn} ->
           Logger.info("NATS client reconnected")
           {:noreply, conn}

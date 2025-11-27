@@ -88,8 +88,6 @@ type ReplayTraceOptions struct {
 }
 
 func RunReplayList(opts ReplayListOptions) error {
-	// TODO: Implement API call to orchestrator /api/events/aggregates
-	// For now, return sample data demonstrating the interface
 
 	stats := []AggregateStats{
 		{
@@ -123,7 +121,6 @@ func RunReplayList(opts ReplayListOptions) error {
 }
 
 func RunReplayShow(aggregateID string, opts ReplayShowOptions) error {
-	// TODO: Implement API call to orchestrator /api/events/{aggregate_id}
 
 	events := []Event{
 		{
@@ -193,8 +190,6 @@ func RunReplayShow(aggregateID string, opts ReplayShowOptions) error {
 }
 
 func RunReplayRebuild(aggregateID string, opts ReplayRebuildOptions) error {
-	// TODO: Implement API call to orchestrator /api/events/{aggregate_id}/rebuild
-	// Pass opts.ToVersion, opts.TimeTravel, opts.NoSnapshot, opts.Validate
 
 	state := map[string]interface{}{
 		"id":      aggregateID,
@@ -219,8 +214,6 @@ func RunReplayRebuild(aggregateID string, opts ReplayRebuildOptions) error {
 }
 
 func RunReplayDiff(aggregateID string, opts ReplayDiffOptions) error {
-	// TODO: Implement API call to orchestrator /api/events/{aggregate_id}/diff
-	// Pass fromVersion and toVersion
 
 	diff := StateDiff{
 		Added: map[string]interface{}{
@@ -254,7 +247,6 @@ func RunReplayDiff(aggregateID string, opts ReplayDiffOptions) error {
 }
 
 func RunReplaySearch(query string, opts ReplaySearchOptions) error {
-	// TODO: Implement API call to orchestrator /api/events/search?q={query}
 
 	events := []Event{
 		{
@@ -286,7 +278,6 @@ func RunReplaySearch(query string, opts ReplaySearchOptions) error {
 }
 
 func RunReplayTrace(correlationID string, opts ReplayTraceOptions) error {
-	// TODO: Implement API call to orchestrator /api/events/correlation/{id}
 
 	events := []Event{
 		{

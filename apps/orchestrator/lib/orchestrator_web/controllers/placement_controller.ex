@@ -65,11 +65,6 @@ defmodule OrchestratorWeb.PlacementController do
         }
 
         json(conn, response)
-
-      {:error, reason} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: inspect(reason)})
     end
   end
 
@@ -86,11 +81,6 @@ defmodule OrchestratorWeb.PlacementController do
         }
 
         json(conn, response)
-
-      {:error, reason} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: inspect(reason)})
     end
   end
 
@@ -98,11 +88,6 @@ defmodule OrchestratorWeb.PlacementController do
     case CostOptimizer.calculate_total_cost() do
       {:ok, analysis} ->
         json(conn, analysis)
-
-      {:error, reason} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: inspect(reason)})
     end
   end
 
@@ -244,7 +229,7 @@ defmodule OrchestratorWeb.PlacementController do
 
   defp parse_affinity_rules(_), do: []
 
-  defp evaluate_cost_efficiency(machine) do
+  defp evaluate_cost_efficiency(_machine) do
     %{
       current_cost_per_hour: 5.0,
       optimal_cost_per_hour: 4.0,

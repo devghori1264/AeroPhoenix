@@ -1,8 +1,9 @@
 defmodule Orchestrator.Placement.Executor do
   use GenServer
   require Logger
+
+  def init(_), do: {:ok, %{}}
   alias Orchestrator.{Repo, Machine, FlydClient}
-  alias Orchestrator.Placement.{CostOptimizer, LatencyOptimizer}
   alias Orchestrator.Events.Writer, as: EventWriter
   import Ecto.Query
   @type execution_mode :: :dry_run | :progressive | :atomic | :staged
@@ -33,7 +34,6 @@ defmodule Orchestrator.Placement.Executor do
   @default_timeout_ms 300_000
   @default_max_concurrent 5
   @default_rate_limit 20
-  @checkpoint_retention_hours 72
   @spec apply_cost_optimization(list(map()), keyword()) ::
           {:ok, execution_result()} | {:error, any()}
   def apply_cost_optimization(recommendations, opts \\ []) do
@@ -102,7 +102,7 @@ defmodule Orchestrator.Placement.Executor do
 
   @spec rollback_execution(String.t(), keyword()) :: {:ok, map()} | {:error, any()}
   def rollback_execution(execution_id, opts \\ []) do
-    Logger.warn("Rolling back execution", execution_id: execution_id)
+    Logger.warning("Rolling back execution", execution_id: execution_id)
 
     with {:ok, checkpoints} <- load_execution_checkpoints(execution_id),
          {:ok, result} <- perform_rollback(checkpoints, opts) do
@@ -382,7 +382,7 @@ defmodule Orchestrator.Placement.Executor do
     end)
   end
 
-  defp build_execution_context(type, opts) do
+  defp build_execution_context(_type, opts) do
     %__MODULE__{
       execution_id: generate_execution_id(),
       mode: Keyword.get(opts, :mode, :dry_run),
@@ -464,7 +464,7 @@ defmodule Orchestrator.Placement.Executor do
 
             {:error, reason} ->
               if execution.auto_rollback do
-                Logger.warn("Batch failed, initiating rollback",
+                Logger.warning("Batch failed, initiating rollback",
                   execution_id: execution.execution_id,
                   reason: inspect(reason)
                 )
@@ -612,7 +612,7 @@ defmodule Orchestrator.Placement.Executor do
     )
 
     with {:ok, _} <- FlydClient.stop_machine(machine_id),
-         {:ok, machine} <- update_machine_specs(machine_id, specs),
+         {:ok, _machine} <- update_machine_specs(machine_id, specs),
          {:ok, _} <- FlydClient.start_machine(machine_id) do
       {:ok,
        %{
@@ -633,7 +633,7 @@ defmodule Orchestrator.Placement.Executor do
     end
   end
 
-  defp execute_consolidation(%{machines_to_move: machines, target_host: target} = action) do
+  defp execute_consolidation(%{machines_to_move: machines, target_host: target} = _action) do
     Logger.info("Executing consolidation",
       machine_count: length(machines),
       target_host: target
@@ -674,7 +674,7 @@ defmodule Orchestrator.Placement.Executor do
     end
   end
 
-  defp execute_decommission(%{host_id: host_id} = action) do
+  defp execute_decommission(%{host_id: host_id} = _action) do
     Logger.info("Executing host decommission", host_id: host_id)
 
     case validate_host_empty(host_id) do
@@ -686,14 +686,6 @@ defmodule Orchestrator.Placement.Executor do
                action: :decommission,
                host_id: host_id,
                status: :completed
-             }}
-
-          {:error, reason} ->
-            {:error,
-             %{
-               action: :decommission,
-               host_id: host_id,
-               reason: reason
              }}
         end
 
@@ -770,7 +762,7 @@ defmodule Orchestrator.Placement.Executor do
   end
 
   defp perform_rollback(snapshots, _opts) do
-    Logger.warn("Performing rollback", machine_count: map_size(snapshots))
+    Logger.warning("Performing rollback", machine_count: map_size(snapshots))
 
     results =
       Enum.map(snapshots, fn {machine_id, snapshot} ->
