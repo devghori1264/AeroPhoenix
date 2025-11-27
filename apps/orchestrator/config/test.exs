@@ -6,6 +6,7 @@ database_url =
 
 config :orchestrator, Orchestrator.Repo,
   url: database_url,
+  pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 5,
   show_sensitive_data_on_connection_error: true,
   log: false

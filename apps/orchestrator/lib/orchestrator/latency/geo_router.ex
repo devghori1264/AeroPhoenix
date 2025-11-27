@@ -36,7 +36,9 @@ defmodule Orchestrator.Latency.GeoRouter do
     "dxb" => {25.2532, 55.3657},
     "jnb" => {-26.1393, 28.2460}
   }
-  @spec haversine_distance(coordinates(), coordinates()) :: float()
+  @spec haversine_distance(coordinates() | map(), coordinates() | map()) :: float()
+  def haversine_distance(%{lat: lat1, lon: lon1}, loc2), do: haversine_distance({lat1, lon1}, loc2)
+  def haversine_distance(loc1, %{lat: lat2, lon: lon2}), do: haversine_distance(loc1, {lat2, lon2})
   def haversine_distance({lat1, lon1}, {lat2, lon2}) do
     lat1_rad = degrees_to_radians(lat1)
     lon1_rad = degrees_to_radians(lon1)
@@ -69,7 +71,20 @@ defmodule Orchestrator.Latency.GeoRouter do
   @spec select_best_region(keyword()) :: region_info() | nil
   def select_best_region(opts) do
     user_location = Keyword.fetch!(opts, :user_location)
-    available_regions = Keyword.fetch!(opts, :available_regions)
+    available_regions =
+      Keyword.fetch!(opts, :available_regions)
+      |> Enum.map(fn
+        region when is_atom(region) or is_binary(region) ->
+          %{
+            id: region,
+            name: to_string(region),
+            p95_latency_ms: 0.0,
+            cpu_utilization_pct: 0.0
+          }
+
+        region ->
+          region
+      end)
 
     weights = Keyword.get(opts, :weights, %{distance: 0.5, latency: 0.3, capacity: 0.2})
     max_distance_km = Keyword.get(opts, :max_distance_km, 10_000)
@@ -80,7 +95,7 @@ defmodule Orchestrator.Latency.GeoRouter do
       available_regions
       |> Enum.reject(&(&1.id in exclude_regions))
       |> Enum.map(fn region ->
-        coordinates = Map.get(@region_coordinates, region.id, {0.0, 0.0})
+        coordinates = Map.get(@region_coordinates, to_string(region.id), {0.0, 0.0})
         distance_km = haversine_distance(user_location, coordinates)
 
         Map.merge(region, %{
@@ -102,6 +117,10 @@ defmodule Orchestrator.Latency.GeoRouter do
     else
       max_distance = Enum.max_by(enriched_regions, & &1.distance_km).distance_km
       max_latency = Enum.max_by(enriched_regions, & &1.p95_latency_ms).p95_latency_ms
+
+      # Avoid division by zero
+      max_distance = if max_distance == 0, do: 1.0, else: max_distance
+      max_latency = if max_latency == 0, do: 1.0, else: max_latency
 
       scored_regions =
         Enum.map(enriched_regions, fn region ->
@@ -140,7 +159,7 @@ defmodule Orchestrator.Latency.GeoRouter do
   def closest_regions(opts) do
     user_location = Keyword.fetch!(opts, :user_location)
     count = Keyword.get(opts, :count, 3)
-    exclude_regions = Keyword.get(opts, :exclude_regions, [])
+    exclude_regions = Keyword.get(opts, :exclude_regions, []) |> Enum.map(&to_string/1)
 
     @region_coordinates
     |> Enum.reject(fn {region_id, _coords} -> region_id in exclude_regions end)

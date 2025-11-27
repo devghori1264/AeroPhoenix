@@ -63,7 +63,7 @@ jobs:
 
       - name: Run Elixir tests
         env:
-          DATABASE_URL: "ecto://postgres:password@localhost:5432/orchestrator_test"
+          DATABASE_URL: "ecto://aerouser:aeropass@localhost:5432/aerophoenix_test"
           MIX_ENV: test
         run: |
           cd apps/orchestrator && mix test
