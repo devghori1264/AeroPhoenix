@@ -5,14 +5,13 @@ defmodule Orchestrator.Security.VaultTest do
   alias Orchestrator.Security.SecretInjector
 
   @moduletag :security
+  @moduletag timeout: 120_000
 
   setup do
     start_supervised!(Vault)
     {:ok, _} = SecretInjector.start_link()
 
     machine_id = "test_machine_#{:rand.uniform(100_000)}"
-
-
 
     {:ok, machine_id: machine_id}
   end
@@ -300,7 +299,7 @@ defmodule Orchestrator.Security.VaultTest do
     end
 
     test "secrets never touch disk (RAM-only)" do
-      {:ok, secret, _} = Vault.generate_secret("disk_test")
+      {:ok, _secret, _} = Vault.generate_secret("disk_test")
 
       tables = :ets.all()
       assert :vault_secrets in tables

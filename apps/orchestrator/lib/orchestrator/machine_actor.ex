@@ -22,9 +22,14 @@ defmodule Orchestrator.MachineActor do
     GenServer.call(server, {:transition, transition_type, opts}, :infinity)
   end
 
-  @spec get_state(GenServer.server()) :: {:ok, map()}
+  @spec get_state(GenServer.server()) :: {:ok, atom()}
   def get_state(server) do
     GenServer.call(server, :get_state)
+  end
+
+  @spec get_snapshot(GenServer.server()) :: {:ok, map()}
+  def get_snapshot(server) do
+    GenServer.call(server, :get_snapshot)
   end
 
   @spec get_history(GenServer.server(), keyword()) :: {:ok, [map()]}
@@ -52,7 +57,6 @@ defmodule Orchestrator.MachineActor do
       case GenServer.call(server, :health_check, timeout) do
         :ok ->
           elapsed = System.monotonic_time(:millisecond) - start_time
-
           if elapsed > 1_000 do
             {:ok, :degraded}
           else
@@ -67,22 +71,39 @@ defmodule Orchestrator.MachineActor do
 
   @impl true
   def init(opts) do
+    Process.flag(:trap_exit, true)
     id = Keyword.fetch!(opts, :id)
     region = Keyword.fetch!(opts, :region)
 
-    data_dir = Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
-    File.mkdir_p!(data_dir)
-
-    db_path = Path.join(data_dir, "#{id}.db")
+    db_path =
+      if Application.get_env(:orchestrator, :force_memory_db) do
+        ":memory:"
+      else
+        data_dir = Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
+        File.mkdir_p!(data_dir)
+        Path.join(data_dir, "#{id}.db")
+      end
 
     case Storage.init(db_path) do
       {:ok, conn} ->
         metadata =
           case Storage.load_metadata(conn) do
             {:ok, meta} ->
-              Logger.info("MachineActor[#{id}] recovered from disk",
+              Logger.debug("MachineActor[#{id}] recovered from disk",
                 region: meta.region,
                 state: meta.state
+              )
+
+              Logger.info("MachineFSM[#{id}] initialized",
+                status: meta.state,
+                region: meta.region,
+                version: meta.version
+              )
+
+              Logger.info("MachineActor[#{id}] initialized",
+                status: meta.state,
+                region: meta.region,
+                version: meta.version
               )
 
               meta
@@ -101,44 +122,48 @@ defmodule Orchestrator.MachineActor do
               }
 
               :ok = Storage.save_metadata(conn, initial_meta)
-              Logger.info("MachineActor[#{id}] created", region: region)
+              Logger.debug("MachineActor[#{id}] created", region: region)
               initial_meta
           end
 
         case WAL.replay(conn, metadata.state) do
           {:ok, recovered_state, pending_operations} ->
-            Logger.info("MachineActor[#{id}] WAL replay complete",
+            Logger.debug("MachineActor[#{id}] WAL replay complete",
               final_state: recovered_state,
               pending_ops: length(pending_operations)
             )
 
-            case WAL.replay_uncommitted_intents(conn, current_state: recovered_state) do
-              {:ok, replay_result} ->
-                if replay_result.completed != [] ||
-                     replay_result.rolled_back != [] ||
-                     replay_result.conflicts != [] do
-                  Logger.info("MachineActor[#{id}] uncommitted intent replay complete",
-                    completed: length(replay_result.completed),
-                    rolled_back: length(replay_result.rolled_back),
-                    conflicts: length(replay_result.conflicts)
-                  )
-
-                  :telemetry.execute(
-                    [:machine_actor, :crash_recovery, :complete],
-                    %{
-                      completed_count: length(replay_result.completed),
-                      rolled_back_count: length(replay_result.rolled_back),
+            final_state =
+              case WAL.replay_uncommitted_intents(conn, current_state: recovered_state) do
+                {:ok, replay_result} ->
+                  if replay_result.completed != [] ||
+                        replay_result.rolled_back != [] ||
+                        replay_result.conflicts != [] do
+                    Logger.debug("MachineActor[#{id}] uncommitted intent replay complete",
+                      completed: length(replay_result.completed),
+                      rolled_back: length(replay_result.rolled_back),
                       conflict_count: length(replay_result.conflicts)
-                    },
-                    %{id: id}
-                  )
-                end
+                    )
 
-              {:error, reason} ->
-                Logger.error("MachineActor[#{id}] uncommitted intent replay failed",
-                  reason: inspect(reason)
-                )
-            end
+                    :telemetry.execute(
+                      [:machine_actor, :crash_recovery, :complete],
+                      %{
+                        completed_count: length(replay_result.completed),
+                        rolled_back_count: length(replay_result.rolled_back),
+                        conflict_count: length(replay_result.conflicts)
+                      },
+                      %{id: id}
+                    )
+                  end
+
+                  replay_result.final_state
+
+                {:error, reason} ->
+                  Logger.error("MachineActor[#{id}] uncommitted intent replay failed",
+                    reason: inspect(reason)
+                  )
+                  recovered_state
+              end
 
             if length(pending_operations) > 0 do
               send(self(), {:reconcile_pending, pending_operations})
@@ -148,7 +173,7 @@ defmodule Orchestrator.MachineActor do
               id: id,
               conn: conn,
               db_path: db_path,
-              metadata: %{metadata | state: recovered_state},
+              metadata: %{metadata | state: final_state},
               operation_lock: nil,
               pending_transitions: :queue.new(),
               stats: %{
@@ -157,6 +182,23 @@ defmodule Orchestrator.MachineActor do
                 avg_transition_ms: 0.0
               }
             }
+
+            resources = %{
+              cpu_cores: metadata.size.cpu_count,
+              memory_mb: metadata.size.memory_mb,
+              disk_mb: Map.get(metadata.size, :disk_mb, 0)
+            }
+
+            case Orchestrator.ResourceManager.reserve_resources(id, resources) do
+              {:ok, _} ->
+                Logger.debug("MachineActor[#{id}] resources reserved", resources: resources)
+
+              {:error, reason} ->
+                Logger.warning("MachineActor[#{id}] failed to reserve resources",
+                  reason: inspect(reason),
+                  resources: resources
+                )
+            end
 
             :telemetry.execute(
               [:machine_actor, :started],
@@ -180,7 +222,7 @@ defmodule Orchestrator.MachineActor do
 
   @impl true
   def handle_call(:get_state, _from, state) do
-    {:reply, state.metadata.state, state}
+    {:reply, {:ok, state.metadata.state}, state}
   end
 
   @impl true
@@ -188,9 +230,13 @@ defmodule Orchestrator.MachineActor do
     {:reply, :ok, state}
   end
 
-  @impl true
   def handle_call(:get_full_state, _from, state) do
     {:reply, state, state}
+  end
+
+  @impl true
+  def handle_call({:transition, transition_type}, from, state) do
+    handle_call({:transition, transition_type, []}, from, state)
   end
 
   @impl true
@@ -202,11 +248,13 @@ defmodule Orchestrator.MachineActor do
 
     case FSM.validate_transition(current_state, target_state) do
       :ok ->
-        case check_capability(state.metadata.capabilities, transition_type) do
+        case FSM.check_preconditions(transition_type, current_state, opts) do
           :ok ->
-            case state.operation_lock do
-              nil ->
-                locked_state = %{state | operation_lock: {operation_id, from, transition_type}}
+            case check_capability(state.metadata.capabilities, transition_type) do
+              :ok ->
+                case state.operation_lock do
+                  nil ->
+                    locked_state = %{state | operation_lock: {operation_id, from, transition_type}}
 
                 wal_entry = %{
                   operation_id: operation_id,
@@ -220,7 +268,7 @@ defmodule Orchestrator.MachineActor do
 
                 case WAL.append(state.conn, wal_entry) do
                   {:ok, wal_seq} ->
-                    Logger.info("MachineActor[#{state.id}] WAL written",
+                    Logger.debug("MachineActor[#{state.id}] WAL written",
                       operation_id: operation_id,
                       transition: "#{current_state} -> #{target_state}",
                       wal_seq: wal_seq
@@ -246,6 +294,10 @@ defmodule Orchestrator.MachineActor do
           {:error, missing_cap} ->
             {:reply, {:error, {:missing_capability, missing_cap}}, state}
         end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -283,16 +335,14 @@ defmodule Orchestrator.MachineActor do
   end
 
   @impl true
-  def handle_info({:execute_transition, operation_id, wal_entry, caller}, state) do
-    start_time = System.monotonic_time(:millisecond)
-
-    result = perform_transition_work(wal_entry.transition_type, wal_entry.opts, state)
-
-    duration_ms = System.monotonic_time(:millisecond) - start_time
-
+  def handle_info(
+        {:transition_done, operation_id, result, wal_entry, duration_ms},
+        %{operation_lock: {locked_op_id, caller, _}} = state
+      )
+      when operation_id == locked_op_id do
     case result do
       {:ok, new_metadata} ->
-        :ok = WAL.mark_completed(state.conn, operation_id)
+        :ok = WAL.mark_completed(state.conn, operation_id, new_metadata.state)
 
         updated_metadata = %{
           new_metadata
@@ -329,7 +379,7 @@ defmodule Orchestrator.MachineActor do
           }
         )
 
-        Logger.info("MachineActor[#{state.id}] transition completed",
+        Logger.debug("MachineActor[#{state.id}] transition completed",
           operation_id: operation_id,
           transition: "#{wal_entry.from_state} -> #{wal_entry.to_state}",
           duration_ms: duration_ms
@@ -372,6 +422,26 @@ defmodule Orchestrator.MachineActor do
   end
 
   @impl true
+  def handle_info(:timeout, state) do
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:execute_transition, operation_id, wal_entry, _caller}, state) do
+    parent = self()
+
+    Task.start(fn ->
+      start_time = System.monotonic_time(:millisecond)
+      result = perform_transition_work(wal_entry.transition_type, wal_entry.opts, state)
+      duration_ms = System.monotonic_time(:millisecond) - start_time
+
+      send(parent, {:transition_done, operation_id, result, wal_entry, duration_ms})
+    end)
+
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({:reconcile_pending, pending_operations}, state) do
     Logger.warning("MachineActor[#{state.id}] reconciling pending operations",
       count: length(pending_operations)
@@ -390,7 +460,12 @@ defmodule Orchestrator.MachineActor do
 
   @impl true
   def terminate(reason, state) do
-    Logger.info("MachineActor[#{state.id}] terminating", reason: inspect(reason))
+    Logger.debug("MachineActor[#{state.id}] terminating", reason: inspect(reason))
+
+    if reason in [:normal, :shutdown] do
+      new_meta = %{state.metadata | state: :stopped}
+      Storage.save_metadata(state.conn, new_meta)
+    end
 
     Storage.close(state.conn)
 

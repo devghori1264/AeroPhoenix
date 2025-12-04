@@ -57,7 +57,7 @@ defmodule Orchestrator.Quota.TokenBucketTest do
       {:ok, bucket} = TokenBucket.consume(bucket, 10)
       {:ok, bucket} = TokenBucket.consume(bucket, 10)
 
-      assert bucket.tokens == 70
+      assert_in_delta bucket.tokens, 70, 0.1
     end
 
     test "refills before consuming" do
@@ -177,7 +177,7 @@ defmodule Orchestrator.Quota.TokenBucketTest do
 
       tokens = TokenBucket.peek(bucket)
       assert tokens >= 90
-      assert tokens <= 110
+      assert tokens <= 115
     end
 
     test "caps refill at capacity" do

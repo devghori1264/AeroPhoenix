@@ -2,7 +2,7 @@ defmodule OrchestratorWeb.PlacementController do
   use OrchestratorWeb, :controller
   require Logger
   alias Orchestrator.Placement.{LatencyOptimizer, CostOptimizer}
-  alias Orchestrator.{Repo, Machine}
+  alias Orchestrator.{Repo, Machines.Machine}
 
   def optimize(conn, params) do
     machine_spec = params["machine_spec"] || %{}

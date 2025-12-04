@@ -2,7 +2,7 @@ defmodule OrchestratorWeb.DebugSession do
   use GenServer
   require Logger
   alias Orchestrator.{Machine, Repo}
-  alias Machine.Proto.{DebugService.Stub, PTYRequest, PTYInput, PTYResize}
+  alias Aerophoenix.Machine.{DebugService, PTYRequest, PTYInput, PTYResize}
   @pty_buffer_size 8192
   @reconnect_interval_ms 5_000
   @max_reconnect_attempts 3
@@ -211,7 +211,7 @@ defmodule OrchestratorWeb.DebugSession do
     with {:ok, channel} <-
            GRPC.Stub.connect(grpc_endpoint, interceptors: [GRPC.Client.Interceptors.Logger]),
          request <- build_pty_request(state),
-         {:ok, stream} <- Stub.attach_pty(channel, request) do
+         {:ok, stream} <- DebugService.Stub.start_pty(channel, request) do
       {:ok, channel, stream}
     else
       {:error, reason} ->
@@ -232,19 +232,26 @@ defmodule OrchestratorWeb.DebugSession do
   end
 
   defp build_pty_request(state) do
-    PTYRequest.new(
+    env_vars =
+      state.env
+      |> Map.to_list()
+      |> Enum.map(fn {key, value} ->
+        struct!(Aerophoenix.Machine.EnvVar, key: to_string(key), value: to_string(value))
+      end)
+
+    struct!(PTYRequest,
       machine_id: state.machine_id,
       shell: state.shell,
       cwd: state.cwd,
       rows: state.rows,
       cols: state.cols,
-      env: Map.to_list(state.env)
+      env: env_vars
     )
   end
 
   defp send_pty_input(state, data) do
     if state.grpc_stream do
-      input = PTYInput.new(data: data)
+      input = struct!(PTYInput, data: data)
 
       case GRPC.Stub.send_request(state.grpc_stream, input) do
         :ok -> :ok
@@ -257,7 +264,7 @@ defmodule OrchestratorWeb.DebugSession do
 
   defp send_pty_resize(state, rows, cols) do
     if state.grpc_stream do
-      resize = PTYResize.new(rows: rows, cols: cols)
+      resize = struct!(PTYResize, rows: rows, cols: cols)
 
       case GRPC.Stub.send_request(state.grpc_stream, resize) do
         :ok -> :ok

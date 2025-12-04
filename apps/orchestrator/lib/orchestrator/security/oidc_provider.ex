@@ -62,7 +62,7 @@ defmodule Orchestrator.Security.OIDCProvider do
       current_key_id: key_id
     }
 
-    Logger.info("OIDC Provider started with key_id=#{key_id}")
+    Logger.debug("OIDC Provider started with key_id=#{key_id}")
 
     :telemetry.execute(
       [:orchestrator, :oidc, :provider_started],
@@ -127,7 +127,7 @@ defmodule Orchestrator.Security.OIDCProvider do
         expires_at = now + @token_ttl_seconds
         :ets.insert(:oidc_revoked_tokens, {jti, expires_at})
 
-        Logger.info("Revoked token jti=#{jti}")
+        Logger.debug("Revoked token jti=#{jti}")
 
         :telemetry.execute(
           [:orchestrator, :oidc, :token_revoked],
@@ -188,7 +188,7 @@ defmodule Orchestrator.Security.OIDCProvider do
 
     :ets.insert(:oidc_keys, {:old_key, old_key_id})
 
-    Logger.info("Rotated signing key: #{old_key_id} -> #{new_key_id}")
+    Logger.debug("Rotated signing key: #{old_key_id} -> #{new_key_id}")
 
     :telemetry.execute(
       [:orchestrator, :oidc, :key_rotated],

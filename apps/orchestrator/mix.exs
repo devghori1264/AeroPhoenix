@@ -10,7 +10,8 @@ defmodule Orchestrator.MixProject do
       deps: deps(),
       aliases: aliases(),
       releases: releases(),
-      elixirc_paths: elixirc_paths(Mix.env())
+      elixirc_paths: elixirc_paths(Mix.env()),
+      preferred_cli_env: ["test.fast": :test]
     ]
   end
 
@@ -67,7 +68,8 @@ defmodule Orchestrator.MixProject do
   defp aliases do
     [
       "ecto.setup": ["ecto.create", "ecto.migrate"],
-      "ecto.reset": ["ecto.drop", "ecto.setup"]
+      "ecto.reset": ["ecto.drop", "ecto.setup"],
+      "test.fast": ["test --exclude slow"]
     ]
   end
 

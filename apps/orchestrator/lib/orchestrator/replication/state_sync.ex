@@ -237,7 +237,7 @@ defmodule Orchestrator.Replication.StateSync do
   defp encode_vector_clock(_), do: %{}
 
   defp simulate_network_transfer(compressed_changes, _target_region, _source_region) do
-    _size = byte_size(compressed_changes)
+    _size = :erlang.external_size(compressed_changes)
     :timer.sleep(:rand.uniform(50))
 
     if :rand.uniform(100) > 5 do

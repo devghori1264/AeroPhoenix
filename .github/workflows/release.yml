@@ -12,7 +12,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build demo artifacts
         run: |
-          # Build small demo tarball
           tar -czf demo_assets.tar.gz demo demo_video.mp4 docs
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1

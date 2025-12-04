@@ -171,7 +171,7 @@ defmodule Orchestrator.Migration.MigrationStream do
         delay_ms = min(100 * :math.pow(2, attempt - 1), 60_000)
         jitter = delay_ms * (0.75 + :rand.uniform() * 0.5)
 
-        Logger.warning("Chunk send failed, retrying",
+        Logger.info("Chunk send failed, retrying",
           machine_id: machine_id,
           chunk: index,
           attempt: attempt,

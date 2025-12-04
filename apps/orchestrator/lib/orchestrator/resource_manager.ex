@@ -34,6 +34,10 @@ defmodule Orchestrator.ResourceManager do
     GenServer.call(__MODULE__, :scan_for_leaks, 30_000)
   end
 
+  def reset do
+    GenServer.call(__MODULE__, :reset)
+  end
+
   @impl true
   def init(opts) do
     reservations_table = :ets.new(:resource_reservations, [:set, :protected, :named_table])
@@ -46,7 +50,7 @@ defmodule Orchestrator.ResourceManager do
     :ets.insert(capacity_table, {:total_cpu, total_cpu})
     :ets.insert(capacity_table, {:total_memory, total_memory})
     :ets.insert(capacity_table, {:total_disk, total_disk})
-    :ets.insert(capacity_table, {:reserved_cpu, 0.0})
+    :ets.insert(capacity_table, {:reserved_cpu, 0})
     :ets.insert(capacity_table, {:reserved_memory, 0})
     :ets.insert(capacity_table, {:reserved_disk, 0})
 
@@ -132,7 +136,7 @@ defmodule Orchestrator.ResourceManager do
 
             emit_reservation_telemetry(:failed, reason, duration_us, resources)
 
-            Logger.warning("Reservation failed",
+            Logger.info("Reservation failed",
               machine_id: machine_id,
               reason: reason,
               shortfall: shortfall,
@@ -234,6 +238,24 @@ defmodule Orchestrator.ResourceManager do
   end
 
   @impl true
+  def handle_call(:reset, _from, state) do
+    :ets.delete_all_objects(state.reservations_table)
+    :ets.insert(state.capacity_table, {:reserved_cpu, 0})
+    :ets.insert(state.capacity_table, {:reserved_memory, 0})
+    :ets.insert(state.capacity_table, {:reserved_disk, 0})
+
+    new_stats = %{
+      state.stats
+      | total_reservations: 0,
+        total_releases: 0,
+        failed_reservations: 0,
+        leaked_reservations: 0
+    }
+
+    {:reply, :ok, %{state | stats: new_stats}}
+  end
+
+  @impl true
   def handle_info(:leak_scan, state) do
     execute_leak_scan(state)
 
@@ -243,7 +265,8 @@ defmodule Orchestrator.ResourceManager do
   end
 
   defp check_capacity_available(state, resources) do
-    [{:reserved_cpu, reserved_cpu}] = :ets.lookup(state.capacity_table, :reserved_cpu)
+    [{:reserved_cpu, reserved_cpu_scaled}] = :ets.lookup(state.capacity_table, :reserved_cpu)
+    reserved_cpu = reserved_cpu_scaled / 100.0
     [{:reserved_memory, reserved_memory}] = :ets.lookup(state.capacity_table, :reserved_memory)
     [{:reserved_disk, reserved_disk}] = :ets.lookup(state.capacity_table, :reserved_disk)
 
@@ -295,15 +318,22 @@ defmodule Orchestrator.ResourceManager do
   end
 
   defp update_capacity_reserved(capacity_table, resources, :add) do
-    :ets.update_counter(capacity_table, :reserved_cpu, resources.cpu_cores)
-    :ets.update_counter(capacity_table, :reserved_memory, resources.memory_mb)
-    :ets.update_counter(capacity_table, :reserved_disk, resources.disk_mb)
+    update_capacity_field(capacity_table, :reserved_cpu, round(resources.cpu_cores * 100))
+    update_capacity_field(capacity_table, :reserved_memory, resources.memory_mb)
+    update_capacity_field(capacity_table, :reserved_disk, resources.disk_mb)
   end
 
   defp update_capacity_reserved(capacity_table, resources, :subtract) do
-    :ets.update_counter(capacity_table, :reserved_cpu, -resources.cpu_cores)
-    :ets.update_counter(capacity_table, :reserved_memory, -resources.memory_mb)
-    :ets.update_counter(capacity_table, :reserved_disk, -resources.disk_mb)
+    update_capacity_field(capacity_table, :reserved_cpu, round(-resources.cpu_cores * 100))
+    update_capacity_field(capacity_table, :reserved_memory, -resources.memory_mb)
+    update_capacity_field(capacity_table, :reserved_disk, -resources.disk_mb)
+  end
+
+  defp update_capacity_field(table, key, amount) do
+    case :ets.lookup(table, key) do
+      [{^key, current}] -> :ets.insert(table, {key, current + amount})
+      [] -> :ets.insert(table, {key, amount})
+    end
   end
 
   defp create_reservation(resources) do
@@ -317,7 +347,8 @@ defmodule Orchestrator.ResourceManager do
   end
 
   defp build_capacity_snapshot(state) do
-    [{:reserved_cpu, reserved_cpu}] = :ets.lookup(state.capacity_table, :reserved_cpu)
+    [{:reserved_cpu, reserved_cpu_scaled}] = :ets.lookup(state.capacity_table, :reserved_cpu)
+    reserved_cpu = reserved_cpu_scaled / 100.0
     [{:reserved_memory, reserved_memory}] = :ets.lookup(state.capacity_table, :reserved_memory)
     [{:reserved_disk, reserved_disk}] = :ets.lookup(state.capacity_table, :reserved_disk)
 
@@ -364,7 +395,7 @@ defmodule Orchestrator.ResourceManager do
 
     leaked_machines =
       Enum.filter(all_reservations, fn {machine_id, _reservation} ->
-        case Registry.lookup(Orchestrator.Registry.Machines, {nil, machine_id}) do
+        case Registry.lookup(Orchestrator.MachineActorRegistry, machine_id) do
           [{pid, _}] when is_pid(pid) ->
             false
 
@@ -384,7 +415,7 @@ defmodule Orchestrator.ResourceManager do
 
       update_capacity_reserved(state.capacity_table, resources, :subtract)
 
-      Logger.warning("Leaked reservation released",
+      Logger.info("Leaked reservation released",
         machine_id: machine_id,
         age_seconds: DateTime.diff(DateTime.utc_now(), reservation.reserved_at)
       )

@@ -35,7 +35,8 @@ defmodule Orchestrator.Logs.Aggregator do
 
   @impl true
   def init(opts) do
-    _buffer_size = Keyword.get(opts, :buffer_size, @buffer_size)
+    buffer_capacity = Keyword.get(opts, :buffer_size, @buffer_size)
+    batch_interval = Keyword.get(opts, :batch_interval, @batch_interval)
 
     Phoenix.PubSub.subscribe(Orchestrator.PubSub, "log_aggregator:all_machines")
 
@@ -49,9 +50,11 @@ defmodule Orchestrator.Logs.Aggregator do
         bytes_received: 0,
         bytes_stored: 0,
         compression_ratio: 0.0,
-        start_time: System.system_time(:second)
+        start_time: System.system_time(:second),
+        buffer_capacity: buffer_capacity,
+        batch_interval: batch_interval
       },
-      batch_timer: schedule_batch_write(),
+      batch_timer: schedule_batch_write(batch_interval),
       storage_pid: nil
     }
 
@@ -70,7 +73,7 @@ defmodule Orchestrator.Logs.Aggregator do
     }
 
     {buffer, stats} =
-      if buffer_size > @buffer_size do
+      if buffer_size > state.stats.buffer_capacity do
         {{:value, _dropped}, new_buffer} = :queue.out(buffer)
 
         new_stats = %{stats | total_dropped: stats.total_dropped + 1}
@@ -93,7 +96,7 @@ defmodule Orchestrator.Logs.Aggregator do
   def handle_info(:write_batch, state) do
     state = write_batch_to_storage(state)
 
-    batch_timer = schedule_batch_write()
+    batch_timer = schedule_batch_write(state.stats.batch_interval)
 
     {:noreply, %{state | batch_timer: batch_timer}}
   end
@@ -136,8 +139,8 @@ defmodule Orchestrator.Logs.Aggregator do
       total_logs_stored: state.stats.total_stored,
       total_logs_dropped: state.stats.total_dropped,
       buffer_size: buffer_size,
-      buffer_capacity: @buffer_size,
-      buffer_utilization: buffer_size / @buffer_size,
+      buffer_capacity: state.stats.buffer_capacity,
+      buffer_utilization: buffer_size / max(state.stats.buffer_capacity, 1),
       batches_written: state.stats.batches_written,
       compression_ratio: state.stats.compression_ratio,
       avg_batch_size:
@@ -263,7 +266,7 @@ defmodule Orchestrator.Logs.Aggregator do
       100
   end
 
-  defp schedule_batch_write do
-    Process.send_after(self(), :write_batch, @batch_interval)
+  defp schedule_batch_write(interval) do
+    Process.send_after(self(), :write_batch, interval)
   end
 end

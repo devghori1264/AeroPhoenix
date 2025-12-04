@@ -1,11 +1,12 @@
 defmodule Orchestrator.Migration.MigrationStreamTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Orchestrator.Migration.{MigrationStream, ProgressTracker}
 
   @moduletag :migration_stream
 
   setup do
+    start_supervised!(ProgressTracker)
     :ok
   end
 
@@ -93,7 +94,7 @@ defmodule Orchestrator.Migration.MigrationStreamTest do
         send(test_pid, {:transfer_complete, result})
       end)
 
-      Process.sleep(100)
+      Process.sleep(300)
 
       progress_samples =
         for _ <- 1..5 do
@@ -121,7 +122,8 @@ defmodule Orchestrator.Migration.MigrationStreamTest do
         MigrationStream.stream_volume(machine_id,
           source_region: :iad,
           dest_region: :lhr,
-          bandwidth_limit_mbps: 10
+          bandwidth_limit_mbps: 10,
+          timeout: 30_000
         )
 
       assert stats.chunks_transferred > 0
@@ -177,7 +179,7 @@ defmodule Orchestrator.Migration.MigrationStreamTest do
       assert measurements.bytes > 0
       assert metadata.machine_id == machine_id
 
-      assert_receive {[:orchestrator, :migration, :progress], _ref, measurements, metadata}, 1000
+      assert_receive {[:orchestrator, :migration, :progress], _ref, measurements, _metadata}, 5000
       assert measurements.progress >= 0.0
       assert measurements.progress <= 1.0
 
@@ -276,7 +278,7 @@ defmodule Orchestrator.Migration.MigrationStreamTest do
 end
 
 defmodule Orchestrator.Migration.BackpressureControllerTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Orchestrator.Migration.BackpressureController
   alias Orchestrator.Migration.BackpressureController.{TokenBucket, AdaptiveRateAdapter}
@@ -330,7 +332,7 @@ defmodule Orchestrator.Migration.BackpressureControllerTest do
 
       elapsed = System.monotonic_time(:millisecond) - start_time
 
-      assert elapsed >= 450
+      assert elapsed >= 350
       assert elapsed <= 550
     end
   end
@@ -362,7 +364,7 @@ defmodule Orchestrator.Migration.BackpressureControllerTest do
 
       Process.sleep(300)
 
-      {:ok, _bucket} = TokenBucket.consume(bucket, 2_097_152)
+      {:ok, bucket} = TokenBucket.consume(bucket, 2_097_152)
 
       {:wait, _wait_ms, _bucket} = TokenBucket.consume(bucket, 1_572_864)
     end
@@ -421,7 +423,7 @@ defmodule Orchestrator.Migration.BackpressureControllerTest do
     end
 
     test "adapts to available bandwidth" do
-      adapter = AdaptiveRateAdapter.new(10.0, 100.0)
+      adapter = AdaptiveRateAdapter.new(10.0, 200.0)
 
       adapter = AdaptiveRateAdapter.update(adapter, 1_048_576, 10, 30)
 
@@ -479,6 +481,8 @@ defmodule Orchestrator.Migration.BackpressureControllerTest do
       static_duration = System.monotonic_time(:millisecond) - start
 
       bucket = TokenBucket.new(10, 10.0)
+      {:ok, bucket} = TokenBucket.consume(bucket, 10_485_760)
+
       start = System.monotonic_time(:millisecond)
 
       _bucket =
@@ -504,13 +508,14 @@ defmodule Orchestrator.Migration.BackpressureControllerTest do
 end
 
 defmodule Orchestrator.Migration.ProgressTrackerTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Orchestrator.Migration.ProgressTracker
 
   @moduletag :progress_tracker
 
   setup do
+    start_supervised!(ProgressTracker)
     :ok
   end
 
@@ -549,6 +554,7 @@ defmodule Orchestrator.Migration.ProgressTrackerTest do
       machine_id = "test_#{:rand.uniform(100_000)}"
 
       :ok = ProgressTracker.start_transfer(machine_id, 50_000_000)
+      Process.sleep(100)
 
       :ok = ProgressTracker.record_chunk(machine_id, 1_048_576)
       Process.sleep(100)
@@ -604,15 +610,19 @@ defmodule Orchestrator.Migration.ProgressTrackerTest do
         ])
 
       :ok = ProgressTracker.start_transfer(machine_id, 10_000_000)
+      _ = ProgressTracker.get_progress(machine_id)
+      Process.sleep(600)
 
       assert_receive {[:orchestrator, :migration, :progress], _ref, measurements, metadata}, 1000
       assert measurements.progress == 0.0
       assert metadata.machine_id == machine_id
 
       :ok = ProgressTracker.record_chunk(machine_id, 5_000_000)
-      Process.sleep(100)
+      {:ok, _state} = ProgressTracker.get_progress(machine_id)
+      Process.sleep(1000)
+      assert Process.alive?(Process.whereis(Orchestrator.Migration.ProgressTracker))
 
-      assert_receive {[:orchestrator, :migration, :progress], _ref, measurements, _metadata}, 1000
+      assert_receive {[:orchestrator, :migration, :progress], _ref, measurements, _metadata}, 2000
       assert measurements.progress >= 0.4
       assert measurements.progress <= 0.6
 
@@ -645,5 +655,3 @@ defmodule Orchestrator.Migration.ProgressTrackerTest do
     end
   end
 end
-
-

@@ -2,7 +2,7 @@ defmodule Orchestrator.Scaling.MetricDefinition do
   use Ecto.Schema
   import Ecto.Changeset
   @primary_key {:id, :binary_id, autogenerate: true}
-  schema "metric_definitions" do
+  schema "scaling_metric_definitions" do
     field(:name, :string)
     field(:type, Ecto.Enum, values: [:cpu, :memory, :request_rate, :latency, :custom])
     field(:unit, :string)

@@ -1,12 +1,14 @@
 defmodule Orchestrator.MachineManager do
-  use Supervisor
+  use DynamicSupervisor
   require Logger
 
   def start_link(_opts) do
-    Supervisor.start_link(__MODULE__, %{}, name: __MODULE__)
+    DynamicSupervisor.start_link(__MODULE__, [], name: __MODULE__)
   end
 
-  def init(_), do: Supervisor.init([], strategy: :one_for_one)
+  def init(_arg) do
+    DynamicSupervisor.init(strategy: :one_for_one)
+  end
 
   def ensure_started(id, attrs \\ %{}) do
     case Registry.lookup(Orchestrator.FSMRegistry, id) do
@@ -14,13 +16,13 @@ defmodule Orchestrator.MachineManager do
         {:ok, pid}
 
       [] ->
-        child = %{
+        child_spec = %{
           id: Orchestrator.MachineFSM,
           start: {Orchestrator.MachineFSM, :start_link, [%{id: id} |> Map.merge(attrs)]},
           restart: :transient
         }
 
-        Supervisor.start_child(__MODULE__, child)
+        DynamicSupervisor.start_child(__MODULE__, child_spec)
     end
   end
 end

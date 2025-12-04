@@ -266,7 +266,7 @@ defmodule Orchestrator.Security.OIDCProviderTest do
     end
 
     test "calculates active tokens count", %{machine_id: machine_id} do
-      initial_stats = OIDCProvider.get_stats()
+      _initial_stats = OIDCProvider.get_stats()
 
       tokens =
         for _ <- 1..10 do

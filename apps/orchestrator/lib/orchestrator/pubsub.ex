@@ -1,15 +1,14 @@
 defmodule Orchestrator.PubSub do
   require Logger
 
-  def publish_machine_update(%Orchestrator.Machine{} = m) do
+  def publish_machine_update(%Orchestrator.Machines.Machine{} = m) do
     payload = %{
       "id" => m.id,
       "name" => m.name,
       "region" => m.region,
       "status" => m.status,
-      "cpu" => m.cpu,
+      "cpu" => m.cpu_count,
       "memory_mb" => m.memory_mb,
-      "latency_ms" => m.latency_ms,
       "updated_at" => DateTime.to_iso8601(m.updated_at || DateTime.utc_now())
     }
 

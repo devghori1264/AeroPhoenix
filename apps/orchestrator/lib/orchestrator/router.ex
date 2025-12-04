@@ -1,7 +1,7 @@
 defmodule Orchestrator.Router do
   use Plug.Router
   require Logger
-  alias Orchestrator.{Repo, Machine, ChaosEngine, PredictivePlanner, PredictiveSimulator}
+  alias Orchestrator.{Repo, Machines.Machine, ChaosEngine, PredictivePlanner, PredictiveSimulator}
 
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], pass: ["application/json"], json_decoder: Jason)
@@ -31,23 +31,13 @@ defmodule Orchestrator.Router do
 
     case Jason.decode(body) do
       {:ok, %{"name" => name, "region" => region} = params} ->
+        machine_type = Map.get(params, "machine_type", "shared-cpu-1x")
         cpu_size = Map.get(params, "cpu_size", "dedicated-cpu-1x")
         memory_mb = Map.get(params, "memory_mb", 512)
 
-        case Orchestrator.Manager.create_machine(name, region) do
+        case Orchestrator.Manager.create_machine(name, region, machine_type, cpu_size, memory_mb) do
           {:ok, machine} ->
-            metadata = Map.merge(machine.metadata || %{}, %{"cpu_size" => cpu_size})
-
-            changeset =
-              Ecto.Changeset.change(machine,
-                memory_mb: memory_mb,
-                metadata: metadata
-              )
-
-            case Repo.update(changeset) do
-              {:ok, updated} -> send_json(conn, 201, updated)
-              {:error, _} -> send_json(conn, 201, machine)
-            end
+            send_json(conn, 201, machine)
 
           {:error, changeset} ->
             send_json(conn, 400, %{error: "validation_failed", details: changeset.errors})

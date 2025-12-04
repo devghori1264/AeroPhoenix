@@ -69,7 +69,8 @@ defmodule Orchestrator.Logs.Producer do
       machine_id: machine_id,
       region: region,
       log_rate: log_rate,
-      runtime_enabled: false,
+      runtime_enabled: enable_runtime and not enable_boot,
+      enable_runtime_after_boot: enable_runtime and enable_boot,
       boot_phase: :not_started,
       log_count: 0,
       start_time: System.system_time(:microsecond)
@@ -211,11 +212,14 @@ defmodule Orchestrator.Logs.Producer do
 
     emit_log(:info, :init, "Machine ready", %{boot_duration_ms: trunc(boot_duration)}, state)
 
-    if state.runtime_enabled do
-      send(self(), :schedule_runtime_log)
-    end
+    new_state = %{state | boot_phase: :complete}
 
-    {:noreply, %{state | boot_phase: :complete}}
+    if Map.get(state, :enable_runtime_after_boot, false) do
+      send(self(), :schedule_runtime_log)
+      {:noreply, %{new_state | runtime_enabled: true}}
+    else
+      {:noreply, new_state}
+    end
   end
 
   @impl true

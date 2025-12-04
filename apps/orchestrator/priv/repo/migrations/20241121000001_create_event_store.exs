@@ -92,7 +92,7 @@ defmodule Orchestrator.Repo.Migrations.CreateEventStore do
     create(index(:events, [:correlation_id], where: "correlation_id IS NOT NULL"))
     execute("CREATE INDEX events_data_gin_idx ON events USING GIN (data)")
     execute("CREATE INDEX events_metadata_gin_idx ON events USING GIN (metadata)")
-    create(index(:event_snapshots, [:aggregate_id, :aggregate_version]))
+
     create(unique_index(:event_snapshots, [:aggregate_id, :aggregate_version]))
     create(unique_index(:event_subscriptions, [:name]))
     create(index(:event_subscriptions, [:subscriber_id]))

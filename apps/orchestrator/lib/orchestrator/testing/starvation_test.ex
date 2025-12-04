@@ -10,49 +10,77 @@ defmodule Orchestrator.Testing.StarvationTest do
   @default_base_delay_ms 100
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @spec set_capacity(region(), capacity()) :: :ok
-  def set_capacity(region, capacity) do
-    GenServer.call(__MODULE__, {:set_capacity, region, capacity})
+  @spec set_capacity(GenServer.server(), region(), capacity()) :: :ok
+  def set_capacity(server \\ __MODULE__, region, capacity) do
+    GenServer.call(server, {:set_capacity, region, capacity})
   end
 
-  @spec fill_to_capacity(region(), capacity()) :: {:ok, [machine_id()]} | {:error, term()}
-  def fill_to_capacity(region, target) do
-    GenServer.call(__MODULE__, {:fill_to_capacity, region, target}, :infinity)
+  @spec fill_to_capacity(GenServer.server(), region(), capacity()) :: {:ok, [machine_id()]} | {:error, term()}
+  def fill_to_capacity(server \\ __MODULE__, region, target) do
+    GenServer.call(server, {:fill_to_capacity, region, target}, :infinity)
   end
 
-  @spec test_starvation(region()) :: {:ok, machine_id()} | {:error, :insufficient_capacity}
-  def test_starvation(region) do
-    GenServer.call(__MODULE__, {:test_starvation, region})
+  @spec test_starvation(GenServer.server(), region()) :: {:ok, machine_id()} | {:error, :insufficient_capacity}
+  def test_starvation(server \\ __MODULE__, region) do
+    GenServer.call(server, {:test_starvation, region})
   end
 
-  @spec retry_with_backoff(region(), keyword()) ::
+  @spec retry_with_backoff(GenServer.server(), region(), keyword()) ::
           {:ok, machine_id()} | {:error, :max_retries_exceeded}
-  def retry_with_backoff(region, opts \\ []) do
-    GenServer.call(__MODULE__, {:retry_with_backoff, region, opts}, :infinity)
+  def retry_with_backoff(server \\ __MODULE__, region, opts \\ []) do
+    max_retries = Keyword.get(opts, :max_retries, @default_max_retries)
+    base_delay_ms = Keyword.get(opts, :base_delay_ms, @default_base_delay_ms)
+    jitter = Keyword.get(opts, :jitter, true)
+
+    Logger.info("Starvation Test: Retrying #{region} with backoff (max #{max_retries} attempts)")
+
+    result = do_retry_with_backoff(server, region, 0, max_retries, base_delay_ms, jitter)
+
+    case result do
+      {:ok, _machine_id} ->
+        Logger.info("Starvation Test: Retry succeeded after backoff")
+
+      {:error, :max_retries_exceeded} ->
+        Logger.info("Starvation Test: Max retries (#{max_retries}) exceeded")
+
+        :telemetry.execute(
+          [:orchestrator, :starvation_test, :retry_exhausted],
+          %{attempts: max_retries},
+          %{region: region}
+        )
+    end
+
+    result
   end
 
-  @spec find_available_region([region()]) ::
+  @spec find_available_region(GenServer.server(), [region()]) ::
           {:ok, {machine_id(), region()}} | {:error, :no_available_regions}
-  def find_available_region(regions) do
-    GenServer.call(__MODULE__, {:find_available_region, regions})
+  def find_available_region(server \\ __MODULE__, regions) do
+    GenServer.call(server, {:find_available_region, regions})
   end
 
-  @spec get_capacity_stats(region()) :: map()
-  def get_capacity_stats(region) do
-    GenServer.call(__MODULE__, {:get_capacity_stats, region})
+  @spec get_capacity_stats(GenServer.server(), region()) :: map()
+  def get_capacity_stats(server \\ __MODULE__, region) do
+    GenServer.call(server, {:get_capacity_stats, region})
   end
 
-  @spec deallocate_machine(machine_id()) :: :ok
-  def deallocate_machine(machine_id) do
-    GenServer.cast(__MODULE__, {:deallocate_machine, machine_id})
+  @spec deallocate_machine(GenServer.server(), machine_id()) :: :ok
+  def deallocate_machine(server \\ __MODULE__, machine_id) do
+    GenServer.cast(server, {:deallocate_machine, machine_id})
   end
 
-  @spec clear_region(region()) :: :ok
-  def clear_region(region) do
-    GenServer.call(__MODULE__, {:clear_region, region})
+  @spec clear_region(GenServer.server(), region()) :: :ok
+  def clear_region(server \\ __MODULE__, region) do
+    GenServer.call(server, {:clear_region, region})
+  end
+
+  @spec reset(GenServer.server()) :: :ok
+  def reset(server \\ __MODULE__) do
+    GenServer.call(server, :reset)
   end
 
   @impl true
@@ -79,7 +107,7 @@ defmodule Orchestrator.Testing.StarvationTest do
     Logger.info("Starvation Test: Filling #{region} to #{target} machines...")
 
     machine_ids =
-      1..target
+      1..target//1
       |> Task.async_stream(
         fn i ->
           machine_id = "starvation_test_machine_#{region}_#{i}_#{:rand.uniform(1_000_000)}"
@@ -125,32 +153,7 @@ defmodule Orchestrator.Testing.StarvationTest do
     end
   end
 
-  @impl true
-  def handle_call({:retry_with_backoff, region, opts}, _from, state) do
-    max_retries = Keyword.get(opts, :max_retries, @default_max_retries)
-    base_delay_ms = Keyword.get(opts, :base_delay_ms, @default_base_delay_ms)
-    jitter = Keyword.get(opts, :jitter, true)
 
-    Logger.info("Starvation Test: Retrying #{region} with backoff (max #{max_retries} attempts)")
-
-    result = do_retry_with_backoff(region, 0, max_retries, base_delay_ms, jitter)
-
-    case result do
-      {:ok, _machine_id} ->
-        Logger.info("Starvation Test: Retry succeeded after backoff")
-
-      {:error, :max_retries_exceeded} ->
-        Logger.info("Starvation Test: Max retries (#{max_retries}) exceeded")
-
-        :telemetry.execute(
-          [:orchestrator, :starvation_test, :retry_exhausted],
-          %{attempts: max_retries},
-          %{region: region}
-        )
-    end
-
-    {:reply, result, state}
-  end
 
   @impl true
   def handle_call({:find_available_region, regions}, _from, state) do
@@ -203,6 +206,14 @@ defmodule Orchestrator.Testing.StarvationTest do
   end
 
   @impl true
+  def handle_call(:reset, _from, state) do
+    :ets.delete_all_objects(:region_capacity)
+    :ets.delete_all_objects(:machine_allocations)
+    Logger.info("Starvation Test: Reset state")
+    {:reply, :ok, state}
+  end
+
+  @impl true
   def handle_cast({:deallocate_machine, machine_id}, state) do
     :ets.delete(:machine_allocations, machine_id)
 
@@ -238,16 +249,14 @@ defmodule Orchestrator.Testing.StarvationTest do
     :ets.match(:machine_allocations, pattern) |> length()
   end
 
-  defp do_retry_with_backoff(_region, attempt, max_retries, _base_delay, _jitter)
+  defp do_retry_with_backoff(_server, _region, attempt, max_retries, _base_delay, _jitter)
        when attempt >= max_retries do
     {:error, :max_retries_exceeded}
   end
 
-  defp do_retry_with_backoff(region, attempt, max_retries, base_delay_ms, jitter) do
-    case check_capacity(region) do
-      {:ok, _available} ->
-        machine_id = "retry_success_#{region}_#{:rand.uniform(1_000_000)}"
-        allocate_machine(machine_id, region)
+  defp do_retry_with_backoff(server, region, attempt, max_retries, base_delay_ms, jitter) do
+    case test_starvation(server, region) do
+      {:ok, machine_id} ->
         {:ok, machine_id}
 
       {:error, :insufficient_capacity} ->
@@ -257,7 +266,7 @@ defmodule Orchestrator.Testing.StarvationTest do
 
         Process.sleep(delay_ms)
 
-        do_retry_with_backoff(region, attempt + 1, max_retries, base_delay_ms, jitter)
+        do_retry_with_backoff(server, region, attempt + 1, max_retries, base_delay_ms, jitter)
     end
   end
 
@@ -265,7 +274,7 @@ defmodule Orchestrator.Testing.StarvationTest do
     delay = (base_delay_ms * :math.pow(2, attempt)) |> round()
 
     if jitter do
-      :rand.uniform(delay)
+      :rand.uniform(max(round(delay), 1))
     else
       delay
     end

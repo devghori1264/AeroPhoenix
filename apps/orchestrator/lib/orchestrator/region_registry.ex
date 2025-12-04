@@ -246,7 +246,7 @@ defmodule Orchestrator.RegionRegistry do
         if health_status do
           Logger.debug("Region #{code} healthy")
         else
-          Logger.warning("Region #{code} unhealthy")
+          Logger.info("Region #{code} unhealthy")
         end
 
         {code, updated_region}

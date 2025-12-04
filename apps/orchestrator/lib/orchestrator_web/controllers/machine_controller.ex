@@ -1,7 +1,7 @@
 defmodule OrchestratorWeb.MachineController do
   use OrchestratorWeb, :controller
   require Logger
-  alias Orchestrator.{Manager, Repo, Machine}
+  alias Orchestrator.{Manager, Repo, Machines.Machine}
 
   def index(conn, _params) do
     json(conn, Manager.list_machines())

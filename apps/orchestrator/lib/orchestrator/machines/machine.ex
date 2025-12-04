@@ -13,7 +13,6 @@ defmodule Orchestrator.Machines.Machine do
              :id,
              :name,
              :region,
-             :state,
              :status,
              :machine_type,
              :cpu_count,
@@ -31,7 +30,7 @@ defmodule Orchestrator.Machines.Machine do
   schema "machines" do
     field(:name, :string)
     field(:region, :string)
-    field(:state, :string)
+
     field(:status, :string)
     field(:machine_type, :string)
     field(:cpu_count, :integer, default: 1)
@@ -45,22 +44,29 @@ defmodule Orchestrator.Machines.Machine do
     timestamps()
   end
 
-  @required_fields ~w(name region state machine_type)a
-  @optional_fields ~w(status cpu_count memory_mb service config tags version metadata last_seen_at)a
+  @required_fields ~w(name region status machine_type)a
+  @optional_fields ~w(id cpu_count memory_mb service config tags version metadata last_seen_at)a
   def changeset(machine, attrs) do
     machine
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
-    |> validate_inclusion(:state, [
+    |> validate_inclusion(:status, [
       "created",
       "stopped",
       "starting",
       "running",
       "stopping",
       "migrating",
-      "destroyed"
+      "destroyed",
+      "healthy",
+      "unhealthy",
+      "unknown",
+      "provisioning",
+      "terminating",
+      "pending",
+      "suspended",
+      "error"
     ])
-    |> validate_inclusion(:status, ["healthy", "unhealthy", "unknown"])
     |> validate_number(:cpu_count, greater_than: 0)
     |> validate_number(:memory_mb, greater_than: 0)
     |> unique_constraint(:name)
@@ -97,12 +103,12 @@ defmodule Orchestrator.Machines.Machine do
   end
 
   def destroy(machine) do
-    __MODULE__.update(machine, %{state: "destroyed"})
+    __MODULE__.update(machine, %{status: "destroyed"})
   end
 
   def stop(machine_id) do
     with {:ok, machine} <- get(machine_id) do
-      __MODULE__.update(machine, %{state: "stopped"})
+      __MODULE__.update(machine, %{status: "stopped"})
     end
   end
 
@@ -120,16 +126,13 @@ defmodule Orchestrator.Machines.Machine do
 
   def active_machines do
     from(m in __MODULE__,
-      where: m.state != "destroyed",
+      where: m.status != "destroyed",
       order_by: [desc: m.inserted_at]
     )
   end
 
   defp apply_filters(query, opts) do
     Enum.reduce(opts, query, fn
-      {:state, state}, q ->
-        from(m in q, where: m.state == ^state)
-
       {:region, region}, q ->
         from(m in q, where: m.region == ^region)
 

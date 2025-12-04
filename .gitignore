@@ -27,4 +27,8 @@ apps/flyd-sim/server
 apps/phoenix_ui/priv/static/*.gz
 apps/phoenix_ui/priv/static/cache_manifest.json
 /apps/phoenix_ui/priv/static/*
+/apps/orchestrator/data/*
+/apps/flyd-sim/bin/*
 .vscode
+*.aegis.bak
+aegis_final.py

@@ -8,19 +8,24 @@ defmodule Orchestrator.NatsListener do
   def init(_) do
     if Code.ensure_loaded?(Gnat) do
       try do
-        uri = URI.parse(@nats_url)
-        opts = %{host: uri.host, port: uri.port || 4222}
+        if is_binary(@nats_url) do
+          uri = URI.parse(@nats_url)
+          opts = %{host: uri.host, port: uri.port || 4222}
 
-        case Gnat.start_link(opts) do
-          {:ok, conn} ->
-            Gnat.sub(conn, self(), "machines.events")
-            Gnat.sub(conn, self(), "ui.actions")
-            Logger.info("NATS connected and subscriptions set")
-            {:ok, conn}
+          case Gnat.start_link(opts) do
+            {:ok, conn} ->
+              Gnat.sub(conn, self(), "machines.events")
+              Gnat.sub(conn, self(), "ui.actions")
+              Logger.info("NATS connected and subscriptions set")
+              {:ok, conn}
 
-          {:error, reason} ->
-            Logger.warning("NATS failed to connect: #{inspect(reason)}, running without NATS")
-            {:ok, nil}
+            {:error, reason} ->
+              Logger.warning("NATS failed to connect: #{inspect(reason)}, running without NATS")
+              {:ok, nil}
+          end
+        else
+          Logger.info("NATS URL not configured, running without NATS")
+          {:ok, nil}
         end
       rescue
         e ->

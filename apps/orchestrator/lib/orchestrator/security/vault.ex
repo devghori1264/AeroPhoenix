@@ -41,7 +41,7 @@ defmodule Orchestrator.Security.Vault do
 
     schedule_expiration_check()
 
-    Logger.info("Vault started", table: @table_name)
+    Logger.debug("Vault started", table: @table_name)
 
     {:ok, %{}}
   end
@@ -57,7 +57,7 @@ defmodule Orchestrator.Security.Vault do
 
     :ets.insert(@table_name, {machine_id, secret, expires_at})
 
-    Logger.info("Secret generated",
+    Logger.debug("Secret generated",
       machine_id: machine_id,
       ttl_seconds: ttl,
       expires_at: expires_at
@@ -110,7 +110,7 @@ defmodule Orchestrator.Security.Vault do
   def handle_call({:revoke_secret, machine_id}, _from, state) do
     :ets.delete(@table_name, machine_id)
 
-    Logger.info("Secret revoked", machine_id: machine_id)
+    Logger.debug("Secret revoked", machine_id: machine_id)
 
     :telemetry.execute(
       [:orchestrator, :security, :secret_revoked],
@@ -153,7 +153,7 @@ defmodule Orchestrator.Security.Vault do
     end)
 
     if length(expired) > 0 do
-      Logger.info("Cleaned expired secrets", count: length(expired))
+      Logger.debug("Cleaned expired secrets", count: length(expired))
     end
 
     schedule_expiration_check()

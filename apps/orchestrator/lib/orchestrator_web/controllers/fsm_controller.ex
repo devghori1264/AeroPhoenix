@@ -1,7 +1,7 @@
 defmodule OrchestratorWeb.FSMController do
   use OrchestratorWeb, :controller
   require Logger
-  alias Orchestrator.{MachineFSM, Repo, Machine}
+  alias Orchestrator.{MachineFSM, Repo, Machines.Machine}
 
   def get_state(conn, %{"machine_id" => machine_id}) do
     case MachineFSM.get_state(machine_id) do

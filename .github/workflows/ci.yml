@@ -61,6 +61,11 @@ jobs:
           cd apps/orchestrator && mix deps.get
           cd ../phoenix_ui && mix deps.get
 
+      - name: Optimize System Limits
+        run: |
+          ulimit -n 65535
+          sudo sysctl -w fs.file-max=65535
+
       - name: Run Elixir tests
         env:
           DATABASE_URL: "ecto://aerouser:aeropass@localhost:5432/aerophoenix_test"

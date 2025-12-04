@@ -333,34 +333,30 @@ defmodule Orchestrator.Repo.Migrations.CreateSecurityCompliance do
 
     # Hypertable for time-series audit logs
     execute("""
-    SELECT create_hypertable(
-      'security_audit_logs',
-      'occurred_at',
-      chunk_time_interval => INTERVAL '7 days'
-    )
-    """)
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable(
+          'security_audit_logs',
+          'occurred_at',
+          chunk_time_interval => INTERVAL '7 days',
+          if_not_exists => TRUE
+        );
 
-    create(index(:security_audit_logs, [:event_type]))
-    create(index(:security_audit_logs, [:event_category]))
-    create(index(:security_audit_logs, [:actor]))
-    create(index(:security_audit_logs, [:resource_type, :resource_id]))
-    create(index(:security_audit_logs, [:status]))
-    create(index(:security_audit_logs, [:occurred_at]))
+        PERFORM add_compression_policy(
+          'security_audit_logs',
+          compress_after => INTERVAL '30 days',
+          if_not_exists => TRUE
+        );
 
-    # Compression policy - compress after 30 days
-    execute("""
-    SELECT add_compression_policy(
-      'security_audit_logs',
-      compress_after => INTERVAL '30 days'
-    )
-    """)
-
-    # Retention policy - keep for 2 years
-    execute("""
-    SELECT add_retention_policy(
-      'security_audit_logs',
-      drop_after => INTERVAL '730 days'
-    )
+        PERFORM add_retention_policy(
+          'security_audit_logs',
+          drop_after => INTERVAL '730 days',
+          if_not_exists => TRUE
+        );
+      END IF;
+    END
+    $$;
     """)
 
     # Secret scanning results table
@@ -428,7 +424,7 @@ defmodule Orchestrator.Repo.Migrations.CreateSecurityCompliance do
       timestamps(type: :utc_datetime)
     end
 
-    create(index(:security_incidents, [:incident_id]))
+
     create(index(:security_incidents, [:severity]))
     create(index(:security_incidents, [:status]))
     create(index(:security_incidents, [:category]))

@@ -52,7 +52,7 @@ defmodule Orchestrator.Network.IPRegistry do
 
     Phoenix.PubSub.subscribe(@pubsub, "ip_registry")
 
-    Logger.info("IP Registry started", table: @table_name, node: node())
+    Logger.debug("IP Registry started", table: @table_name, node: node())
 
     {:ok, %{}}
   end

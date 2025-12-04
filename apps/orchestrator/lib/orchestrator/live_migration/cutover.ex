@@ -1,6 +1,7 @@
 defmodule Orchestrator.LiveMigration.Cutover do
   require Logger
-  alias Orchestrator.FlydClient
+
+  @flyd_client Application.compile_env(:orchestrator, :flyd_client, Orchestrator.FlydClient)
 
   @type cutover_result :: %{
           success: boolean(),
@@ -93,7 +94,7 @@ defmodule Orchestrator.LiveMigration.Cutover do
   end
 
   defp check_health_with_retries(machine_id, region, retries, interval) when retries > 0 do
-    case FlydClient.get_machine_health(region, machine_id) do
+    case @flyd_client.get_machine_health(region, machine_id) do
       {:ok, %{status: "healthy"}} ->
         Logger.debug("Target health check passed", machine_id: machine_id)
         :ok
@@ -126,7 +127,7 @@ defmodule Orchestrator.LiveMigration.Cutover do
     if Map.get(opts, :traffic_replay, false) do
       Logger.info("Starting traffic replay buffer", machine_id: machine_id)
 
-      case FlydClient.start_traffic_capture(source_region, machine_id) do
+      case @flyd_client.start_traffic_capture(source_region, machine_id) do
         {:ok, buffer_id} ->
           {:ok, buffer_id}
 
@@ -153,7 +154,7 @@ defmodule Orchestrator.LiveMigration.Cutover do
 
     drain_start = System.monotonic_time(:millisecond)
 
-    case FlydClient.drain_connections(source_region, machine_id, timeout_ms) do
+    case @flyd_client.drain_connections(source_region, machine_id, timeout_ms) do
       :ok ->
         duration = System.monotonic_time(:millisecond) - drain_start
 
@@ -194,8 +195,8 @@ defmodule Orchestrator.LiveMigration.Cutover do
   defp switch_with_ip_preservation(machine_id, source_region, target_region, opts) do
     Logger.info("Performing IP-preserving cutover", machine_id: machine_id)
 
-    with {:ok, ip_address} <- FlydClient.release_ip(source_region, machine_id),
-         :ok <- FlydClient.assign_ip(target_region, machine_id, ip_address) do
+    with {:ok, ip_address} <- @flyd_client.release_ip(source_region, machine_id),
+         :ok <- @flyd_client.assign_ip(target_region, machine_id, ip_address) do
       Logger.info("IP preserved during cutover",
         machine_id: machine_id,
         ip: ip_address
@@ -218,7 +219,7 @@ defmodule Orchestrator.LiveMigration.Cutover do
     Logger.info("Performing DNS cutover", machine_id: machine_id)
     dns_ttl = Map.get(opts, :dns_ttl, 60)
 
-    case FlydClient.update_dns_record(machine_id, target_region, dns_ttl) do
+    case @flyd_client.update_dns_record(machine_id, target_region, dns_ttl) do
       {:ok, new_endpoint} ->
         Logger.info("DNS updated",
           machine_id: machine_id,
@@ -244,7 +245,7 @@ defmodule Orchestrator.LiveMigration.Cutover do
     if Map.get(opts, :traffic_replay, false) do
       Logger.info("Replaying captured traffic", buffer_id: buffer_id)
 
-      case FlydClient.replay_captured_traffic(buffer_id, new_endpoint) do
+      case @flyd_client.replay_captured_traffic(buffer_id, new_endpoint) do
         {:ok, stats} ->
           Logger.info("Traffic replay completed",
             requests_replayed: stats[:count] || 0,
@@ -269,9 +270,9 @@ defmodule Orchestrator.LiveMigration.Cutover do
   defp finalize_cutover(machine_id, source_region, target_region) do
     Logger.debug("Finalizing cutover", machine_id: machine_id)
 
-    case FlydClient.get_connection_stats(source_region, machine_id) do
+    case @flyd_client.get_connection_stats(source_region, machine_id) do
       {:ok, source_stats} ->
-        case FlydClient.get_connection_stats(target_region, machine_id) do
+        case @flyd_client.get_connection_stats(target_region, machine_id) do
           {:ok, target_stats} ->
             stats = %{
               migrated: target_stats[:active_connections] || 0,

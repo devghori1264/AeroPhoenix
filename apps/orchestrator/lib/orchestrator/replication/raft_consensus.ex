@@ -1,9 +1,18 @@
 defmodule Orchestrator.Replication.RaftConsensus do
   use GenServer
   require Logger
-  @election_timeout_min 150
-  @election_timeout_max 300
-  @heartbeat_interval 50
+  defp election_timeout_min do
+    Application.get_env(:orchestrator, :raft, []) |> Keyword.get(:election_timeout_ms, 150)
+  end
+
+  defp election_timeout_max do
+    min = election_timeout_min()
+    Application.get_env(:orchestrator, :raft, []) |> Keyword.get(:election_timeout_max_ms, min * 2)
+  end
+
+  defp heartbeat_interval do
+    Application.get_env(:orchestrator, :raft, []) |> Keyword.get(:heartbeat_interval_ms, 50)
+  end
   defmodule State do
     defstruct [
       :current_term,
@@ -239,14 +248,14 @@ defmodule Orchestrator.Replication.RaftConsensus do
 
   defp reset_election_timer(state) do
     if state.election_timer, do: Process.cancel_timer(state.election_timer)
-    timeout = :rand.uniform(@election_timeout_max - @election_timeout_min) + @election_timeout_min
+    timeout = :rand.uniform(election_timeout_max() - election_timeout_min() + 1) + election_timeout_min()
     timer = Process.send_after(self(), :election_timeout, timeout)
     %{state | election_timer: timer}
   end
 
   defp schedule_heartbeat(state) do
     if state.heartbeat_timer, do: Process.cancel_timer(state.heartbeat_timer)
-    timer = Process.send_after(self(), :send_heartbeats, @heartbeat_interval)
+    timer = Process.send_after(self(), :send_heartbeats, heartbeat_interval())
     %{state | heartbeat_timer: timer}
   end
 
@@ -262,7 +271,7 @@ defmodule Orchestrator.Replication.RaftConsensus do
         leader_id: nil
     }
 
-    Logger.info("Node #{state.node_id} starting election for term #{new_term}")
+    Logger.debug("Node #{state.node_id} starting election for term #{new_term}")
     {last_log_index, last_log_term} = get_last_log_info(state)
 
     request = %{
@@ -272,18 +281,30 @@ defmodule Orchestrator.Replication.RaftConsensus do
       last_log_term: last_log_term
     }
 
+    me = self()
     Enum.each(state.cluster_nodes, fn node ->
       Task.start(fn ->
         response = request_vote(node, request)
-        send(self(), {:vote_response, node, response})
+        send(me, {:vote_response, node, response})
       end)
     end)
 
     reset_election_timer(new_state)
+    |> check_election_result()
+  end
+
+  defp check_election_result(state) do
+    majority = div(length(state.cluster_nodes) + 1, 2) + 1
+
+    if MapSet.size(state.votes_received) >= majority do
+      become_leader(state)
+    else
+      state
+    end
   end
 
   defp become_leader(state) do
-    Logger.info("Node #{state.node_id} became leader for term #{state.current_term}")
+    Logger.debug("Node #{state.node_id} became leader for term #{state.current_term}")
 
     next_index =
       state.cluster_nodes
@@ -310,7 +331,7 @@ defmodule Orchestrator.Replication.RaftConsensus do
   end
 
   defp become_follower(state, new_term, leader_id \\ nil) do
-    Logger.info("Node #{state.node_id} became follower for term #{new_term}")
+    Logger.debug("Node #{state.node_id} became follower for term #{new_term}")
 
     %{
       state
@@ -380,9 +401,10 @@ defmodule Orchestrator.Replication.RaftConsensus do
         leader_commit: state.commit_index
       }
 
+      me = self()
       Task.start(fn ->
         response = append_entries(node, request)
-        send(self(), {:append_response, node, response})
+        send(me, {:append_response, node, response})
       end)
     end)
   end

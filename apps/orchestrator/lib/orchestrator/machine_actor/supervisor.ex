@@ -12,7 +12,7 @@ defmodule Orchestrator.MachineActor.Supervisor do
   def init(_init_arg) do
     DynamicSupervisor.init(
       strategy: :one_for_one,
-      max_restarts: 5,
+      max_restarts: 500,
       max_seconds: 60
     )
   end
@@ -29,14 +29,15 @@ defmodule Orchestrator.MachineActor.Supervisor do
         size = Keyword.get(opts, :size, %{})
 
         resources = %{
-          cpu_cores: Map.get(size, :cpu_count, 1.0),
-          memory_mb: Map.get(size, :memory_mb, 1024),
-          disk_mb: Map.get(size, :disk_mb, 5120)
+          cpu_cores: Map.get(size, :cpu_count) || Map.get(size, "cpu_count") || 1.0,
+          memory_mb: Map.get(size, :memory_mb) || Map.get(size, "memory_mb") || 1024,
+          disk_mb: Map.get(size, :disk_mb) || Map.get(size, "disk_mb") || 5120
         }
 
         case Orchestrator.ResourceManager.reserve_resources(id, resources) do
           {:ok, _} ->
-            child_spec = {Orchestrator.MachineActor, opts}
+            restart_strategy = Keyword.get(opts, :restart, :permanent)
+            child_spec = Supervisor.child_spec({Orchestrator.MachineActor, opts}, restart: restart_strategy)
 
             case DynamicSupervisor.start_child(__MODULE__, child_spec) do
               {:ok, pid} ->
@@ -59,7 +60,7 @@ defmodule Orchestrator.MachineActor.Supervisor do
               {:error, reason} ->
                 Orchestrator.ResourceManager.release_resources(id)
 
-                Logger.error("Failed to start machine actor, resources released",
+                Logger.info("Failed to start machine actor, resources released",
                   id: id,
                   reason: inspect(reason)
                 )
@@ -105,7 +106,7 @@ defmodule Orchestrator.MachineActor.Supervisor do
                   {:error, :queue_full}
               end
             else
-              Logger.warning("Cannot start machine: insufficient resources",
+              Logger.info("Cannot start machine: insufficient resources",
                 id: id,
                 error: capacity_error,
                 shortfall: inspect(shortfall)
@@ -172,7 +173,10 @@ defmodule Orchestrator.MachineActor.Supervisor do
 
   @spec count_machines() :: non_neg_integer()
   def count_machines do
-    DynamicSupervisor.count_children(__MODULE__).active
+    case Process.whereis(__MODULE__) do
+      nil -> 0
+      _ -> DynamicSupervisor.count_children(__MODULE__).active
+    end
   end
 
   @spec restart_machine(String.t()) :: {:ok, pid()} | {:error, term()}

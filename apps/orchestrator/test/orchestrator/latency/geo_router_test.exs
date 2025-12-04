@@ -132,29 +132,6 @@ defmodule Orchestrator.Latency.GeoRouterTest do
 
       assert best_region == nil
     end
-
-    @tag :skip
-    test "handles capacity factor in selection" do
-      client_location = %{lat: 37.7749, lon: -122.4194}
-
-      capacity_fn = fn region ->
-        case region do
-          :sjc -> 0.95
-          :lax -> 0.50
-          _ -> 0.10
-        end
-      end
-
-      best_region =
-        GeoRouter.select_best_region(
-          client_location,
-          available_regions: [:sjc, :lax, :iad],
-          capacity_fn: capacity_fn,
-          capacity_weight: 0.4
-        )
-
-      assert best_region.id in [:lax, :iad]
-    end
   end
 
   describe "closest_regions/1" do

@@ -1,6 +1,6 @@
 defmodule Orchestrator.Placement.CostOptimizer do
   require Logger
-  alias Orchestrator.{Repo, Machine}
+  alias Orchestrator.{Repo, Machines.Machine}
   @cpu_weight 0.4
   @memory_weight 0.4
   @disk_weight 0.1

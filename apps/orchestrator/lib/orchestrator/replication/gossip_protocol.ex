@@ -89,7 +89,7 @@ defmodule Orchestrator.Replication.GossipProtocol do
     schedule_gossip(state.gossip_interval_ms)
     schedule_heartbeat(state.heartbeat_interval_ms)
 
-    Logger.info("GossipProtocol started",
+    Logger.debug("GossipProtocol started",
       machine_id: machine_id,
       node_id: node_id,
       gossip_interval_ms: state.gossip_interval_ms
@@ -140,7 +140,7 @@ defmodule Orchestrator.Replication.GossipProtocol do
 
   @impl true
   def handle_info({:nodeup, peer_node, _info}, state) do
-    Logger.info("Peer node connected", peer: peer_node, machine_id: state.machine_id)
+    Logger.debug("Peer node connected", peer: peer_node, machine_id: state.machine_id)
 
     detector = PhiAccrualFailureDetector.init(peer_node, phi_threshold: @phi_failed_threshold)
 
@@ -183,6 +183,11 @@ defmodule Orchestrator.Replication.GossipProtocol do
   def handle_info({:heartbeat, from_node}, state) do
     new_state = record_heartbeat(from_node, state)
     {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info(_msg, state) do
+    {:noreply, state}
   end
 
   defp perform_gossip_round(state) do
@@ -386,36 +391,42 @@ defmodule Orchestrator.Replication.GossipProtocol do
   end
 
   defp handle_received_delta(delta, state) do
-    delta_id = extract_delta_id(delta)
+    try do
+      delta_id = extract_delta_id(delta)
 
-    if MapSet.member?(state.seen_deltas, delta_id) do
-      state
-    else
-      case CRDTState.merge_delta(state.crdt_state, delta) do
-        {:ok, updated_crdt} ->
-          new_state = %{
+      if MapSet.member?(state.seen_deltas, delta_id) do
+        state
+      else
+        case CRDTState.merge_delta(state.crdt_state, delta) do
+          {:ok, updated_crdt} ->
+            new_state = %{
+              state
+              | crdt_state: updated_crdt,
+                seen_deltas: MapSet.put(state.seen_deltas, delta_id)
+            }
+
+            new_state = update_metric(new_state, :deltas_received, 1)
+
+            Logger.debug("Merged delta from peer",
+              machine_id: state.machine_id,
+              delta_id: delta_id
+            )
+
+            new_state
+
+          {:error, reason} ->
+            Logger.error("Failed to merge delta",
+              machine_id: state.machine_id,
+              reason: reason
+            )
+
             state
-            | crdt_state: updated_crdt,
-              seen_deltas: MapSet.put(state.seen_deltas, delta_id)
-          }
-
-          new_state = update_metric(new_state, :deltas_received, 1)
-
-          Logger.debug("Merged delta from peer",
-            machine_id: state.machine_id,
-            delta_id: delta_id
-          )
-
-          new_state
-
-        {:error, reason} ->
-          Logger.error("Failed to merge delta",
-            machine_id: state.machine_id,
-            reason: reason
-          )
-
-          state
+        end
       end
+    rescue
+      _ ->
+        Logger.warning("Received malformed delta", delta: inspect(delta))
+        state
     end
   end
 

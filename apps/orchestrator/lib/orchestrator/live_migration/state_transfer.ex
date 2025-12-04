@@ -1,6 +1,6 @@
 defmodule Orchestrator.LiveMigration.StateTransfer do
   require Logger
-  alias Orchestrator.FlydClient
+  @flyd_client Application.compile_env(:orchestrator, :flyd_client, Orchestrator.FlydClient)
 
   @type transfer_result :: %{
           bytes_transferred: non_neg_integer(),
@@ -42,6 +42,7 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
         bytes_transferred: transfer_stats.bytes_transferred,
         dirty_pages: length(dirty_pages),
         total_pages: transfer_stats.total_pages,
+        pages_transferred: transfer_stats.pages_transferred,
         duration_ms: duration,
         throughput_mbps: throughput
       }
@@ -101,6 +102,7 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
         bytes_transferred: transfer_stats.bytes_transferred,
         dirty_pages: length(dirty_pages),
         total_pages: transfer_stats.total_pages,
+        pages_transferred: transfer_stats.pages_transferred,
         duration_ms: duration,
         throughput_mbps: throughput
       }
@@ -155,6 +157,7 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
         bytes_transferred: transfer_stats.bytes_transferred,
         dirty_pages: length(critical_pages),
         total_pages: transfer_stats.total_pages,
+        pages_transferred: transfer_stats.pages_transferred,
         duration_ms: duration,
         throughput_mbps: throughput
       }
@@ -233,13 +236,9 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
   end
 
   defp fetch_pages_from_source(pages, source_region) do
-    case FlydClient.get_machine_pages(source_region, pages) do
+    case @flyd_client.get_machine_pages(source_region, pages) do
       {:ok, page_data} ->
         {:ok, page_data}
-
-      {:error, :not_implemented} ->
-        Logger.debug("Page fetching not implemented, using placeholder")
-        {:ok, :erlang.term_to_binary(pages)}
 
       error ->
         error
@@ -247,12 +246,8 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
   end
 
   defp send_to_target(data, checksum, target_region, opts) do
-    case FlydClient.write_machine_pages(target_region, data, checksum, opts) do
+    case @flyd_client.write_machine_pages(target_region, data, checksum, opts) do
       :ok ->
-        :ok
-
-      {:error, :not_implemented} ->
-        Logger.debug("Page writing not implemented")
         :ok
 
       error ->
@@ -262,12 +257,8 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
 
   defp verify_transfer(machine_id, checksum, target_region, opts) do
     if Map.get(opts, :verify_checksums, true) do
-      case FlydClient.verify_pages_checksum(target_region, machine_id, checksum) do
+      case @flyd_client.verify_pages_checksum(target_region, machine_id, checksum) do
         :ok ->
-          :ok
-
-        {:error, :not_implemented} ->
-          Logger.debug("Checksum verification not implemented")
           :ok
 
         error ->
@@ -279,13 +270,9 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
   end
 
   defp get_dirty_pages(machine_id, checkpoint_id, source_region) do
-    case FlydClient.get_dirty_pages_since_checkpoint(source_region, machine_id, checkpoint_id) do
+    case @flyd_client.get_dirty_pages_since_checkpoint(source_region, machine_id, checkpoint_id) do
       {:ok, pages} ->
         {:ok, pages}
-
-      {:error, :not_implemented} ->
-        Logger.debug("Dirty page tracking not implemented")
-        {:ok, generate_mock_dirty_pages()}
 
       error ->
         error
@@ -293,13 +280,9 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
   end
 
   defp get_critical_pages(_machine_id, checkpoint_id, source_region) do
-    case FlydClient.get_critical_pages(source_region, checkpoint_id) do
+    case @flyd_client.get_critical_pages(source_region, checkpoint_id) do
       {:ok, pages} ->
         {:ok, pages}
-
-      {:error, :not_implemented} ->
-        Logger.debug("Critical page identification not implemented")
-        {:ok, generate_mock_critical_pages()}
 
       error ->
         error
@@ -372,26 +355,4 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
 
   defp calculate_throughput(_, _), do: 0.0
 
-  defp generate_mock_dirty_pages do
-    Enum.map(1..100, fn i ->
-      %{
-        page_id: "page_#{i}",
-        offset: i * 4096,
-        size: 4096,
-        checksum: Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
-      }
-    end)
-  end
-
-  defp generate_mock_critical_pages do
-    Enum.map(1..20, fn i ->
-      %{
-        page_id: "critical_page_#{i}",
-        offset: i * 4096,
-        size: 4096,
-        priority: :high,
-        checksum: Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
-      }
-    end)
-  end
 end

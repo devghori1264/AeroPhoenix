@@ -88,7 +88,7 @@ defmodule Orchestrator.Migration.ProgressTracker do
       transfer_state ->
         now = System.monotonic_time(:millisecond)
 
-        duration_since_last = now - transfer_state.last_update_ms
+        duration_since_last = max(now - transfer_state.last_update_ms, 1)
         instant_rate_mbps = chunk_bytes / 1_048_576 / (duration_since_last / 1000)
 
         ema_rate =
@@ -218,7 +218,7 @@ defmodule Orchestrator.Migration.ProgressTracker do
     now = System.monotonic_time(:millisecond)
     elapsed_seconds = (now - transfer_state.start_time_ms) / 1000
 
-    progress = transfer_state.transferred_bytes / transfer_state.total_bytes
+    progress = if transfer_state.total_bytes > 0, do: transfer_state.transferred_bytes / transfer_state.total_bytes, else: 1.0
     remaining_bytes = transfer_state.total_bytes - transfer_state.transferred_bytes
 
     eta_seconds =
@@ -243,11 +243,17 @@ defmodule Orchestrator.Migration.ProgressTracker do
     time_since_last_update = now - transfer_state.last_update_ms
 
     if time_since_last_update > @stall_threshold_ms do
+      progress_pct = 
+        if transfer_state.total_bytes > 0 do
+          Float.round(transfer_state.transferred_bytes / transfer_state.total_bytes * 100, 2)
+        else
+          100.0
+        end
+
       Logger.warning("Transfer stalled",
         machine_id: transfer_state.machine_id,
         stalled_for_seconds: round(time_since_last_update / 1000),
-        progress:
-          Float.round(transfer_state.transferred_bytes / transfer_state.total_bytes * 100, 2)
+        progress: progress_pct
       )
 
       :telemetry.execute(

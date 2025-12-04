@@ -3,16 +3,10 @@ defmodule Orchestrator.Replication.GossipProtocolTest do
 
   alias Orchestrator.Replication.{
     GossipProtocol,
-    CRDTState,
-    VectorClock,
-    HybridLogicalClock
+    CRDTState
   }
 
   setup do
-    start_supervised!({Registry, keys: :unique, name: Orchestrator.Registry})
-
-    start_supervised!({Phoenix.PubSub, name: Orchestrator.PubSub})
-
     :ok
   end
 
@@ -142,7 +136,6 @@ defmodule Orchestrator.Replication.GossipProtocolTest do
   end
 
   describe "failure detection integration" do
-    @tag :skip
     test "records heartbeats from peers" do
       machine_id = "test-machine-#{:rand.uniform(10000)}"
       crdt_state = CRDTState.new(machine_id)
@@ -163,7 +156,6 @@ defmodule Orchestrator.Replication.GossipProtocolTest do
       assert stats.total_peers >= 1
     end
 
-    @tag :skip
     test "detects failed peers via phi accrual" do
       machine_id = "test-machine-#{:rand.uniform(10000)}"
       crdt_state = CRDTState.new(machine_id)
@@ -172,20 +164,20 @@ defmodule Orchestrator.Replication.GossipProtocolTest do
         GossipProtocol.start_link(
           machine_id: machine_id,
           crdt_state: crdt_state,
-          heartbeat_interval_ms: 100
+          heartbeat_interval_ms: 20
         )
 
       peer_node = :peer@localhost
 
       for _ <- 1..10 do
         send(pid, {:heartbeat, peer_node})
-        Process.sleep(110)
+        Process.sleep(20)
       end
 
       stats_healthy = GossipProtocol.stats(pid)
       assert stats_healthy.active_peers >= 1
 
-      Process.sleep(2_000)
+      Process.sleep(4_000)
 
       stats_failed = GossipProtocol.stats(pid)
       assert stats_failed.failed_peers >= 1

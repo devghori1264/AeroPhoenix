@@ -1,8 +1,10 @@
 defmodule Orchestrator.Reconciliation.Engine do
   use GenServer
   require Logger
-  alias Orchestrator.{Repo, Machine, FlydClient}
+  alias Orchestrator.{Repo, Machines.Machine}
   alias Orchestrator.Reconciliation.{DriftAnalyzer, AutoHealer}
+
+  @flyd_client Application.compile_env(:orchestrator, :flyd_client, Orchestrator.FlydClient)
   @type reconciliation_level :: :basic | :standard | :deep | :paranoid
   @type healing_strategy :: :auto | :manual | :rollback
   @type drift_severity :: :critical | :major | :minor | :none
@@ -299,6 +301,10 @@ defmodule Orchestrator.Reconciliation.Engine do
       healing: config.healing_strategy
     )
 
+    if owner = config[:sandbox_owner] do
+      Ecto.Adapters.SQL.Sandbox.allow(Orchestrator.Repo, owner, self())
+    end
+
     :telemetry.execute(
       [:orchestrator, :reconciliation, :started],
       %{},
@@ -367,7 +373,7 @@ defmodule Orchestrator.Reconciliation.Engine do
   defp fetch_source_state(machine, config) do
     source_region = Map.get(machine.metadata, "source_region") || machine.region
 
-    case FlydClient.get_machine_state(machine.id, region: source_region, level: config.level) do
+    case @flyd_client.get_machine_state(machine.id, region: source_region, level: config.level) do
       {:ok, state} ->
         {:ok, Map.put(state, :region, source_region)}
 
@@ -384,7 +390,7 @@ defmodule Orchestrator.Reconciliation.Engine do
   defp fetch_target_state(machine, config) do
     target_region = Map.get(machine.metadata, "target_region") || machine.region
 
-    case FlydClient.get_machine_state(machine.id, region: target_region, level: config.level) do
+    case @flyd_client.get_machine_state(machine.id, region: target_region, level: config.level) do
       {:ok, state} ->
         {:ok, Map.put(state, :region, target_region)}
 

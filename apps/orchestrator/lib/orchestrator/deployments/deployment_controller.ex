@@ -13,7 +13,7 @@ defmodule Orchestrator.Deployments.DeploymentController do
     DeploymentHook
   }
 
-  alias Orchestrator.Machines.Machine
+  alias Orchestrator.Machines
   @check_interval 5_000
   @health_check_interval 10_000
   def start_link(opts \\ []) do
@@ -531,8 +531,8 @@ defmodule Orchestrator.Deployments.DeploymentController do
     })
 
     if replica.machine_id do
-      case Machine.get(replica.machine_id) do
-        {:ok, machine} -> Machine.destroy(machine)
+      case Machines.Machine.get(replica.machine_id) do
+        {:ok, machine} -> Machines.Machine.destroy(machine)
         _ -> :ok
       end
     end

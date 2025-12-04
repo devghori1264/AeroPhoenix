@@ -12,13 +12,13 @@ defmodule Orchestrator.ReplicationTest do
 
   describe "Coordinator" do
     test "manages region registry and leader election" do
-      {:ok, coordinator} = Coordinator.start_link(replication_mode: :async)
+      {:ok, _coordinator} = Coordinator.start_link(replication_mode: :async)
 
       :ok = Coordinator.register_region("us-east-1", %{})
       :ok = Coordinator.register_region("us-west-1", %{})
       :ok = Coordinator.register_region("eu-west-1", %{})
 
-      Process.sleep(100)
+      Process.sleep(10)
 
       leader = Coordinator.get_leader()
       assert leader in ["us-east-1", "us-west-1", "eu-west-1"]
@@ -45,13 +45,13 @@ defmodule Orchestrator.ReplicationTest do
 
   describe "Raft Consensus" do
     test "performs leader election" do
-      nodes = ["node1", "node2", "node3"]
+      _nodes = ["node1", "node2", "node3"]
 
       {:ok, _} = RaftConsensus.start_link(node_id: "node1", cluster_nodes: ["node2", "node3"])
       {:ok, _} = RaftConsensus.start_link(node_id: "node2", cluster_nodes: ["node1", "node3"])
       {:ok, _} = RaftConsensus.start_link(node_id: "node3", cluster_nodes: ["node1", "node2"])
 
-      Process.sleep(500)
+      wait_for_cluster_leader(["node1", "node2", "node3"])
 
       state1 = RaftConsensus.get_state("node1")
       state2 = RaftConsensus.get_state("node2")
@@ -67,8 +67,9 @@ defmodule Orchestrator.ReplicationTest do
     test "replicates log entries" do
       {:ok, _} = RaftConsensus.start_link(node_id: "leader", cluster_nodes: [])
 
-      Process.sleep(200)
+      Process.sleep(20)
 
+      wait_for_leader("leader")
       {:ok, index} = RaftConsensus.append_command("leader", {:set, "key1", "value1"})
       assert index == 1
 
@@ -182,10 +183,13 @@ defmodule Orchestrator.ReplicationTest do
   describe "State Sync" do
     test "records and syncs changes" do
       {:ok, _sync} =
-        StateSync.start_link(
-          source_region: "us-east-1",
-          target_regions: ["us-west-1", "eu-west-1"]
-        )
+        case StateSync.start_link(
+               source_region: "us-east-1",
+               target_regions: ["us-west-1", "eu-west-1"]
+             ) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+        end
 
       StateSync.record_change("key1", :set, "value1")
       StateSync.record_change("key2", :set, "value2")
@@ -229,6 +233,47 @@ defmodule Orchestrator.ReplicationTest do
 
       status = RegionReplica.get_status("us-east-1")
       assert status.role == :follower
+    end
+  end
+
+  defp wait_for_leader(node_id, attempts \\ 20) do
+    case RaftConsensus.get_state(node_id) do
+      %{role: :leader} ->
+        :ok
+
+      _ ->
+        if attempts > 0 do
+          Process.sleep(50)
+          wait_for_leader(node_id, attempts - 1)
+        else
+          :error
+        end
+    end
+  end
+
+  defp wait_for_cluster_leader(nodes, attempts \\ 20) do
+    leaders =
+      Enum.filter(nodes, fn node ->
+        match?({:ok, %{role: :leader}}, try_get_state(node))
+      end)
+
+    if length(leaders) == 1 do
+      :ok
+    else
+      if attempts > 0 do
+        Process.sleep(50)
+        wait_for_cluster_leader(nodes, attempts - 1)
+      else
+        :error
+      end
+    end
+  end
+
+  defp try_get_state(node) do
+    try do
+      {:ok, RaftConsensus.get_state(node)}
+    catch
+      :exit, _ -> :error
     end
   end
 end

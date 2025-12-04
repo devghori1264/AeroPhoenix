@@ -8,7 +8,7 @@ defmodule Orchestrator.PredictivePlanner do
     beta = opts[:beta] || 0.5
     gamma = opts[:gamma] || 0.2
 
-    case Orchestrator.Repo.get(Orchestrator.Machine, machine_id) do
+    case Orchestrator.Repo.get(Orchestrator.Machines.Machine, machine_id) do
       nil ->
         {:error, :not_found}
 
@@ -31,7 +31,7 @@ defmodule Orchestrator.PredictivePlanner do
   end
 
   defp candidate_regions_except(current) do
-    Orchestrator.Repo.all(from(m in Orchestrator.Machine, select: m.region))
+    Orchestrator.Repo.all(from(m in Orchestrator.Machines.Machine, select: m.region))
     |> Enum.uniq()
     |> Enum.reject(&(&1 == current))
   end

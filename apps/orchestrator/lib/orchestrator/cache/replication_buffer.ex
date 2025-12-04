@@ -53,7 +53,9 @@ defmodule Orchestrator.Cache.ReplicationBuffer do
   def init(opts) do
     debounce_ms = Keyword.get(opts, :debounce_ms, @default_debounce_ms)
 
-    :ets.new(:replication_dlq, [:set, :public, :named_table])
+    if :ets.info(:replication_dlq) == :undefined do
+      :ets.new(:replication_dlq, [:set, :public, :named_table])
+    end
 
     state = %{
       pending: %{},

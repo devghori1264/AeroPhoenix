@@ -18,8 +18,15 @@ defmodule Orchestrator.DataCase do
   end
 
   def setup_sandbox(tags) do
-    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Orchestrator.Repo, shared: not tags[:async])
+    shared = not tags[:async] or tags[:integration]
+    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Orchestrator.Repo, shared: shared)
+
+    if shared do
+      Ecto.Adapters.SQL.Sandbox.mode(Orchestrator.Repo, {:shared, self()})
+    end
+
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+    :ok
   end
 
   def errors_on(changeset) do

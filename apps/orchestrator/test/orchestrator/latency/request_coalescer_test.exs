@@ -4,7 +4,10 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
   alias Orchestrator.Latency.RequestCoalescer
 
   setup do
-    start_supervised!({Registry, keys: :unique, name: Orchestrator.Registry})
+    case start_supervised({Registry, keys: :unique, name: Orchestrator.Registry}) do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
+    end
     :ok
   end
 
@@ -19,7 +22,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
           operation_type: :test_operation,
           executor_fn: executor_fn,
           batch_window_ms: 10,
-          max_batch_size: 100
+          max_batch_size: 100,
+          notify_pid: self()
         )
 
       assert Process.alive?(pid)
@@ -29,7 +33,6 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
   describe "execute/2 - basic batching" do
     test "batches multiple requests within time window" do
       executor_fn = fn requests ->
-        send(self(), {:batch_executed, length(requests)})
         Map.new(requests, fn req_id -> {req_id, {:ok, %{result: "success_#{req_id}"}}} end)
       end
 
@@ -37,7 +40,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
         RequestCoalescer.start_link(
           operation_type: :test_batch,
           executor_fn: executor_fn,
-          batch_window_ms: 50
+          batch_window_ms: 50,
+          notify_pid: self()
         )
 
       task1 =
@@ -72,12 +76,11 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
       assert result2 == %{result: "success_req2"}
       assert result3 == %{result: "success_req3"}
 
-      assert_receive {:batch_executed, 3}
+      assert_receive {:batch_executed, 3, _}, 2000
     end
 
     test "flushes batch when max size reached" do
       executor_fn = fn requests ->
-        send(self(), {:batch_executed, length(requests)})
         Map.new(requests, fn req_id -> {req_id, {:ok, %{id: req_id}}} end)
       end
 
@@ -86,7 +89,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
           operation_type: :test_max_size,
           executor_fn: executor_fn,
           batch_window_ms: 1_000,
-          max_batch_size: 3
+          max_batch_size: 3,
+          notify_pid: self()
         )
 
       tasks =
@@ -106,8 +110,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
                _ -> false
              end)
 
-      assert_receive {:batch_executed, 3}
-      assert_receive {:batch_executed, 2}
+      assert_receive {:batch_executed, 3, _}, 2000
+      assert_receive {:batch_executed, 2, _}, 2000
     end
   end
 
@@ -124,7 +128,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
         RequestCoalescer.start_link(
           operation_type: :test_dedup,
           executor_fn: executor_fn,
-          batch_window_ms: 50
+          batch_window_ms: 50,
+          notify_pid: self()
         )
 
       task1 =
@@ -164,8 +169,9 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
     end
 
     test "does not deduplicate different requests" do
+      test_pid = self()
       executor_fn = fn requests ->
-        send(self(), {:batch_requests, requests})
+        send(test_pid, {:batch_requests, requests})
         Map.new(requests, fn req_id -> {req_id, {:ok, %{id: req_id}}} end)
       end
 
@@ -173,7 +179,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
         RequestCoalescer.start_link(
           operation_type: :test_no_dedup,
           executor_fn: executor_fn,
-          batch_window_ms: 50
+          batch_window_ms: 50,
+          notify_pid: self()
         )
 
       task1 =
@@ -195,7 +202,7 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
       Task.await(task2)
       Task.await(task3)
 
-      assert_receive {:batch_requests, requests}
+      assert_receive {:batch_requests, requests}, 2000
       assert length(requests) == 3
       assert "req1" in requests
       assert "req2" in requests
@@ -218,7 +225,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
         RequestCoalescer.start_link(
           operation_type: :test_partial_fail,
           executor_fn: executor_fn,
-          batch_window_ms: 50
+          batch_window_ms: 50,
+          notify_pid: self()
         )
 
       task1 =
@@ -251,7 +259,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
         RequestCoalescer.start_link(
           operation_type: :test_batch_fail,
           executor_fn: executor_fn,
-          batch_window_ms: 50
+          batch_window_ms: 50,
+          notify_pid: self()
         )
 
       task =
@@ -277,7 +286,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
         RequestCoalescer.start_link(
           operation_type: :test_timeout,
           executor_fn: executor_fn,
-          batch_window_ms: 10
+          batch_window_ms: 10,
+          notify_pid: self()
         )
 
       result =
@@ -301,7 +311,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
         RequestCoalescer.start_link(
           operation_type: :test_stats,
           executor_fn: executor_fn,
-          batch_window_ms: 50
+          batch_window_ms: 50,
+          notify_pid: self()
         )
 
       tasks =
@@ -335,7 +346,6 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
   describe "edge cases" do
     test "handles single request (no batching benefit)" do
       executor_fn = fn requests ->
-        send(self(), {:batch_size, length(requests)})
         Map.new(requests, fn req_id -> {req_id, {:ok, %{id: req_id}}} end)
       end
 
@@ -343,7 +353,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
         RequestCoalescer.start_link(
           operation_type: :test_single,
           executor_fn: executor_fn,
-          batch_window_ms: 50
+          batch_window_ms: 50,
+          notify_pid: self()
         )
 
       {:ok, _result} =
@@ -352,20 +363,22 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
           request: %{id: "req1"}
         )
 
-      assert_receive {:batch_size, 1}
+      assert_receive {:batch_executed, 1, _}, 2000
     end
 
     test "handles empty batch gracefully" do
+      test_pid = self()
       executor_fn = fn _requests ->
-        send(self(), :batch_executed)
+        send(test_pid, :batch_executed)
         %{}
       end
 
-      {:ok, pid} =
+      {:ok, _pid} =
         RequestCoalescer.start_link(
           operation_type: :test_empty,
           executor_fn: executor_fn,
-          batch_window_ms: 10
+          batch_window_ms: 10,
+          notify_pid: self()
         )
 
       Process.sleep(50)
@@ -383,7 +396,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
           operation_type: :test_large_limit,
           executor_fn: executor_fn,
           batch_window_ms: 50,
-          max_batch_size: 10_000
+          max_batch_size: 10_000,
+          notify_pid: self()
         )
 
       tasks =
@@ -414,7 +428,8 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
           operation_type: :test_concurrent,
           executor_fn: executor_fn,
           batch_window_ms: 100,
-          max_batch_size: 2
+          max_batch_size: 2,
+          notify_pid: self()
         )
 
       tasks =

@@ -494,7 +494,7 @@ defmodule Orchestrator.ResourceCoordinator do
   defp subscribe_to_crdt_channel(node_id) do
     case Process.whereis(:gnat) do
       nil ->
-        Logger.warning("NATS not available, skipping CRDT gossip subscription (local dev mode)",
+        Logger.info("NATS not available, skipping CRDT gossip subscription (local dev mode)",
           node_id: node_id
         )
 

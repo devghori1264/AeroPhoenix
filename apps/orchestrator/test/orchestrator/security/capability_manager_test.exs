@@ -124,7 +124,7 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
 
       assert :ok = CapabilityManager.check(machine_id, {:read_volume, "vol_xyz"})
 
-      Process.sleep(1100)
+      Process.sleep(2100)
 
       assert {:error, :capability_expired} =
                CapabilityManager.check(machine_id, {:read_volume, "vol_xyz"})
@@ -174,7 +174,7 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
           resource: "vol_xyz"
         )
 
-      {:ok, read_cap} = CapabilityManager.attenuate(write_cap, :read_only)
+      {:ok, _read_cap} = CapabilityManager.attenuate(write_cap, :read_only)
 
       assert :ok = CapabilityManager.check(machine_id, {:write_volume, "vol_xyz"})
       assert :ok = CapabilityManager.check(machine_id, {:read_volume, "vol_xyz"})
@@ -322,7 +322,7 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
           resource: "vol_1"
         )
 
-      {:ok, cap2} =
+      {:ok, _cap2} =
         CapabilityManager.grant(
           machine_id: machine_id,
           action: :read_volume,
@@ -380,7 +380,7 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
 
       assert length(CapabilityManager.list(machine_id)) == 1
 
-      Process.sleep(1100)
+      Process.sleep(2100)
 
       assert length(CapabilityManager.list(machine_id)) == 0
     end
@@ -448,7 +448,7 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
 
       {:ok, read_cap} = CapabilityManager.attenuate(write_cap, :read_only)
 
-      {:ok, delegated_cap} =
+      {:ok, _delegated_cap} =
         CapabilityManager.delegate(
           read_cap,
           from: machine_a,
@@ -525,12 +525,10 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
       self_pid = self()
 
       :telemetry.attach(
-        "test-capability-granted-#{ref}",
+        "test-capability-granted-#{inspect(ref)}",
         [:orchestrator, :capability, :granted],
-        fn _event, measurements, metadata, _config ->
-          send(self_pid, {:telemetry, measurements, metadata})
-        end,
-        nil
+        &__MODULE__.handle_telemetry/4,
+        self_pid
       )
 
       {:ok, _cap} =
@@ -548,7 +546,7 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
       assert metadata.action == :read_volume
       assert is_binary(metadata.capability_id)
 
-      :telemetry.detach("test-capability-granted-#{ref}")
+      :telemetry.detach("test-capability-granted-#{inspect(ref)}")
     end
 
     test "emits capability revoked event", %{machine_a: machine_id} do
@@ -563,20 +561,18 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
       self_pid = self()
 
       :telemetry.attach(
-        "test-capability-revoked-#{ref}",
+        "test-capability-revoked-#{inspect(ref)}",
         [:orchestrator, :capability, :revoked],
-        fn _event, _measurements, metadata, _config ->
-          send(self_pid, {:telemetry, metadata})
-        end,
-        nil
+        &__MODULE__.handle_telemetry/4,
+        self_pid
       )
 
       :ok = CapabilityManager.revoke(cap.id)
 
-      assert_receive {:telemetry, metadata}, 1000
+      assert_receive {:telemetry, _measurements, metadata}, 1000
       assert metadata.capability_id == cap.id
 
-      :telemetry.detach("test-capability-revoked-#{ref}")
+      :telemetry.detach("test-capability-revoked-#{inspect(ref)}")
     end
 
     test "emits check_passed and check_failed events", %{machine_a: machine_id} do
@@ -591,21 +587,17 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
       self_pid = self()
 
       :telemetry.attach(
-        "test-check-passed-#{ref}",
+        "test-check-passed-#{inspect(ref)}",
         [:orchestrator, :capability, :check_passed],
-        fn _event, _measurements, metadata, _config ->
-          send(self_pid, {:check_passed, metadata})
-        end,
-        nil
+        &__MODULE__.handle_telemetry/4,
+        self_pid
       )
 
       :telemetry.attach(
-        "test-check-failed-#{ref}",
+        "test-check-failed-#{inspect(ref)}",
         [:orchestrator, :capability, :check_failed],
-        fn _event, _measurements, metadata, _config ->
-          send(self_pid, {:check_failed, metadata})
-        end,
-        nil
+        &__MODULE__.handle_telemetry/4,
+        self_pid
       )
 
       :ok = CapabilityManager.check(machine_id, {:net_outbound, "0.0.0.0/0"})
@@ -619,8 +611,21 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
       assert metadata.action == :write_volume
       assert metadata.reason == :insufficient_capability
 
-      :telemetry.detach("test-check-passed-#{ref}")
-      :telemetry.detach("test-check-failed-#{ref}")
+      :telemetry.detach("test-check-passed-#{inspect(ref)}")
+      :telemetry.detach("test-check-failed-#{inspect(ref)}")
     end
+  end
+
+
+  def handle_telemetry([:orchestrator, :capability, :check_passed], _measurements, metadata, test_pid) do
+    send(test_pid, {:check_passed, metadata})
+  end
+
+  def handle_telemetry([:orchestrator, :capability, :check_failed], _measurements, metadata, test_pid) do
+    send(test_pid, {:check_failed, metadata})
+  end
+
+  def handle_telemetry(_event, measurements, metadata, test_pid) do
+    send(test_pid, {:telemetry, measurements, metadata})
   end
 end

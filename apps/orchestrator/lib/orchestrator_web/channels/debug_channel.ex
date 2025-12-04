@@ -1,7 +1,7 @@
 defmodule OrchestratorWeb.DebugChannel do
   use OrchestratorWeb, :channel
   require Logger
-  alias Orchestrator.{Repo, Machine}
+  alias Orchestrator.{Repo, Machines.Machine}
   alias OrchestratorWeb.DebugSession
   @max_session_duration_hours 8
   @heartbeat_interval_ms 30_000

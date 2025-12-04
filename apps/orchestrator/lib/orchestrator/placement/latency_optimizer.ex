@@ -1,7 +1,7 @@
 defmodule Orchestrator.Placement.LatencyOptimizer do
   require Logger
   import Ecto.Query
-  alias Orchestrator.{Repo, Machine}
+  alias Orchestrator.{Repo, Machines.Machine}
   @default_latency_weight 0.4
   @default_affinity_weight 0.3
   @default_distribution_weight 0.3

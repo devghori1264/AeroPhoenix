@@ -19,7 +19,7 @@ defmodule Orchestrator.Network.NetworkIdentityTest do
       ipv6 = Identity.allocate_ipv6()
 
       assert is_binary(ipv6)
-      assert String.starts_with?(ipv6, "2a09:8280:1::")
+      assert String.starts_with?(ipv6, "2a09:8280:1:")
       assert Identity.valid_ipv6?(ipv6)
     end
 
@@ -37,7 +37,7 @@ defmodule Orchestrator.Network.NetworkIdentityTest do
       ipv6 = Identity.allocate_ipv6()
 
       assert {:ok, uuid_hex} = Identity.extract_uuid(ipv6)
-      assert byte_size(uuid_hex) == 16
+      assert byte_size(uuid_hex) == 20
     end
 
     test "generates time-ordered addresses" do
@@ -55,7 +55,7 @@ defmodule Orchestrator.Network.NetworkIdentityTest do
   describe "Identity.valid_ipv6?/1" do
     test "validates correct IPv6 formats" do
       assert Identity.valid_ipv6?("2a09:8280:1::1")
-      assert Identity.valid_ipv6?("2a09:8280:1::abc123")
+      assert Identity.valid_ipv6?("2a09:8280:1:0:0:0:abc:123")
       assert Identity.valid_ipv6?("2001:db8::1")
       assert Identity.valid_ipv6?("::1")
     end

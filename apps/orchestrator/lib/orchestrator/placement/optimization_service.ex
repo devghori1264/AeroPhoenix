@@ -1,7 +1,8 @@
 defmodule Orchestrator.Placement.OptimizationService do
   use GenServer
   require Logger
-  alias Orchestrator.{Repo, Machine}
+  alias Orchestrator.Repo
+  alias Orchestrator.Machines
   alias Orchestrator.Placement.{CostOptimizer, LatencyOptimizer, Executor}
   import Ecto.Query
 
@@ -199,7 +200,7 @@ defmodule Orchestrator.Placement.OptimizationService do
             result
 
           {:error, reason} ->
-            Logger.error("Cost optimization execution failed", reason: inspect(reason))
+            Logger.info("Cost optimization execution failed", reason: inspect(reason))
             %{success: false, error: reason}
         end
       end
@@ -264,7 +265,7 @@ defmodule Orchestrator.Placement.OptimizationService do
             result
 
           {:error, reason} ->
-            Logger.error("Latency optimization execution failed", reason: inspect(reason))
+            Logger.info("Latency optimization execution failed", reason: inspect(reason))
             %{success: false, error: reason}
         end
       end
@@ -382,7 +383,7 @@ defmodule Orchestrator.Placement.OptimizationService do
     filters = Keyword.get(opts, :filters, %{})
 
     query =
-      from(m in Machine,
+      from(m in Machines.Machine,
         where: m.status in ["running", "stopped"],
         select: m
       )
@@ -396,7 +397,7 @@ defmodule Orchestrator.Placement.OptimizationService do
     target_regions = Keyword.get(opts, :target_regions)
 
     query =
-      from(m in Machine,
+      from(m in Machines.Machine,
         where: m.status == "running",
         select: m
       )

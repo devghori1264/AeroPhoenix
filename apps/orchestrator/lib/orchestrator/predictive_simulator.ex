@@ -3,7 +3,7 @@ defmodule Orchestrator.PredictiveSimulator do
   def simulate_plan(plan) when is_list(plan) do
     results =
       Enum.map(plan, fn %{"id" => id, "target_region" => target} ->
-        case Orchestrator.Repo.get(Orchestrator.Machine, id) do
+        case Orchestrator.Repo.get(Orchestrator.Machines.Machine, id) do
           nil ->
             %{id: id, error: "not_found"}
 

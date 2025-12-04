@@ -274,7 +274,7 @@ func (s *Server) MigrateMachine(ctx context.Context, req *proto.MigrateRequest) 
 	}
 
 	mig, err := s.migrationEngine.StartMigration(
-		ctx,
+		context.Background(),
 		req.MachineId,
 		req.TargetRegion,
 		strategy,

@@ -22,7 +22,7 @@ defmodule Orchestrator.FlydClient do
   end
 
   @spec migrate_machine(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, any()}
-  def migrate_machine(machine_id, target_region, opts \\ []) do
+  def migrate_machine(machine_id, target_region, opts \\ []) when is_binary(machine_id) and is_binary(target_region) do
     strategy = Keyword.get(opts, :strategy, "stop_and_move")
 
     unless strategy in ["stop_and_move", "live_migration", "clone_and_redirect"] do
@@ -220,7 +220,7 @@ defmodule Orchestrator.FlydClient do
         options
       end
 
-    if map_size(options) == 0, do: nil, else: options
+    if map_size(options) == 0, do: %{}, else: options
   end
 
   defp parse_sse_event(data) do

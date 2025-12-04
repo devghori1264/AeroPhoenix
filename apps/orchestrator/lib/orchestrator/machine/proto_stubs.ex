@@ -1,4 +1,4 @@
-defmodule Orchestrator.Machine.Proto.DebugService.Stub do
+defmodule Orchestrator.Machines.Machine.Proto.DebugService.Stub do
   def connect(_endpoint, _opts), do: {:ok, :channel}
   def disconnect(_channel), do: :ok
   def attach_pty(_channel, _request), do: {:ok, :stream}
@@ -6,17 +6,17 @@ defmodule Orchestrator.Machine.Proto.DebugService.Stub do
   def recv(_stream), do: {:ok, :data}
 end
 
-defmodule Orchestrator.Machine.Proto.PTYRequest do
+defmodule Orchestrator.Machines.Machine.Proto.PTYRequest do
   defstruct [:command, :args, :env, :rows, :cols]
   def new(opts), do: struct(__MODULE__, opts)
 end
 
-defmodule Orchestrator.Machine.Proto.PTYInput do
+defmodule Orchestrator.Machines.Machine.Proto.PTYInput do
   defstruct [:data]
   def new(opts), do: struct(__MODULE__, opts)
 end
 
-defmodule Orchestrator.Machine.Proto.PTYResize do
+defmodule Orchestrator.Machines.Machine.Proto.PTYResize do
   defstruct [:rows, :cols]
   def new(opts), do: struct(__MODULE__, opts)
 end

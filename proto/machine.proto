@@ -14,6 +14,10 @@ service MachineService {
   rpc StreamMigrationProgress (MigrationStatusRequest) returns (stream MigrationProgressEvent);
 }
 
+service DebugService {
+  rpc StartPTY (PTYRequest) returns (stream PTYOutput);
+}
+
 message PingRequest {}
 message PingResponse {
   string msg = 1;
@@ -120,4 +124,33 @@ message MigrationProgressEvent {
   int32 progress_percent = 3;
   string message = 4;
   int64 timestamp = 5;
+}
+
+// Debug PTY Messages
+message PTYRequest {
+  string machine_id = 1;
+  string shell = 2;
+  string cwd = 3;
+  int32 rows = 4;
+  int32 cols = 5;
+  repeated EnvVar env = 6;
+}
+
+message EnvVar {
+  string key = 1;
+  string value = 2;
+}
+
+message PTYInput {
+  string data = 1;
+}
+
+message PTYResize {
+  int32 rows = 1;
+  int32 cols = 2;
+}
+
+message PTYOutput {
+  string data = 1;
+  int32 exit_code = 2;
 }

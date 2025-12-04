@@ -12,18 +12,15 @@ defmodule Orchestrator.Security.KillSwitch do
   @api_rate_threshold_rps 1000
   @consecutive_violations_to_trip 5
 
-  @graceful_shutdown_timeout_ms 10_000
-  @force_kill_timeout_ms 1_000
-
   @monitoring_interval_ms 1_000
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @spec start_monitoring(machine_id()) :: :ok
-  def start_monitoring(machine_id) do
-    GenServer.call(__MODULE__, {:start_monitoring, machine_id})
+  @spec start_monitoring(machine_id(), keyword()) :: :ok
+  def start_monitoring(machine_id, opts \\ []) do
+    GenServer.call(__MODULE__, {:start_monitoring, machine_id, opts})
   end
 
   @spec stop_monitoring(machine_id()) :: :ok
@@ -43,7 +40,7 @@ defmodule Orchestrator.Security.KillSwitch do
 
   @spec kill_machine(machine_id(), keyword()) :: :ok
   def kill_machine(machine_id, opts \\ []) do
-    GenServer.call(__MODULE__, {:kill_machine, machine_id, opts})
+    GenServer.call(__MODULE__, {:kill_machine, machine_id, opts}, :infinity)
   end
 
   @spec global_kill(keyword()) :: {:ok, non_neg_integer()} | {:error, atom()}
@@ -85,12 +82,19 @@ defmodule Orchestrator.Security.KillSwitch do
   end
 
   @impl true
-  def handle_call({:start_monitoring, machine_id}, _from, state) do
-    monitor_pid = spawn_link(fn -> monitoring_loop(machine_id) end)
+  def handle_call({:start_monitoring, machine_id, opts}, _from, state) do
+    simulate = Keyword.get(opts, :simulate, true)
+
+    monitor_pid =
+      if simulate do
+        spawn_link(fn -> monitoring_loop(machine_id) end)
+      else
+        nil
+      end
 
     :ets.insert(:kill_switch_state, {machine_id, :closed, 0, []})
 
-    Logger.info("Started monitoring machine=#{machine_id}")
+    Logger.info("Started monitoring machine=#{machine_id} simulate=#{simulate}")
 
     :telemetry.execute(
       [:orchestrator, :kill_switch, :monitoring_started],
@@ -98,7 +102,13 @@ defmodule Orchestrator.Security.KillSwitch do
       %{machine_id: machine_id}
     )
 
-    new_state = put_in(state.monitoring_pids[machine_id], monitor_pid)
+    new_state =
+      if monitor_pid do
+        put_in(state.monitoring_pids[machine_id], monitor_pid)
+      else
+        put_in(state.monitoring_pids[machine_id], :no_pid)
+      end
+
     {:reply, :ok, new_state}
   end
 
@@ -106,6 +116,7 @@ defmodule Orchestrator.Security.KillSwitch do
   def handle_call({:stop_monitoring, machine_id}, _from, state) do
     case Map.get(state.monitoring_pids, machine_id) do
       nil -> :ok
+      :no_pid -> :ok
       pid -> Process.exit(pid, :normal)
     end
 
@@ -361,14 +372,25 @@ defmodule Orchestrator.Security.KillSwitch do
   defp check_threshold(_metric, _value), do: nil
 
   defp do_kill_machine(machine_id, _reason) do
-    Logger.info("Sending SIGTERM to machine=#{machine_id}")
-    Process.sleep(@graceful_shutdown_timeout_ms)
+    graceful_timeout =
+      Application.get_env(:orchestrator, :kill_switch, [])
+      |> Keyword.get(:graceful_shutdown_timeout, 10_000)
+
+    force_timeout =
+      Application.get_env(:orchestrator, :kill_switch, [])
+      |> Keyword.get(:force_kill_timeout, 1_000)
+
+    Logger.info(
+      "Sending SIGTERM to machine=#{machine_id} graceful=#{graceful_timeout} force=#{force_timeout}"
+    )
+
+    Process.sleep(graceful_timeout)
     still_running = :rand.uniform(10) > 8
 
     if still_running do
       Logger.warning("Machine #{machine_id} did not respond to SIGTERM, sending SIGKILL")
 
-      Process.sleep(@force_kill_timeout_ms)
+      Process.sleep(force_timeout)
     end
 
     Logger.info("Cleaned up resources for machine=#{machine_id}")

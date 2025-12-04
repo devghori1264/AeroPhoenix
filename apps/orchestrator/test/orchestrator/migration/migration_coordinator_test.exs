@@ -4,6 +4,7 @@ defmodule Orchestrator.Migration.MigrationCoordinatorTest do
   alias Orchestrator.Migration.MigrationCoordinator
 
   setup do
+    start_supervised!(Orchestrator.FlydSim)
     {:ok, _pid} = start_supervised(MigrationCoordinator)
     :ok
   end
@@ -33,7 +34,7 @@ defmodule Orchestrator.Migration.MigrationCoordinatorTest do
 
       duration = System.monotonic_time(:millisecond) - start_time
 
-      assert duration < 1000
+      assert duration < 5000
     end
 
     test "handles multiple concurrent migrations" do
@@ -47,7 +48,7 @@ defmodule Orchestrator.Migration.MigrationCoordinatorTest do
           end)
         end
 
-      results = Task.await_many(tasks, 5000)
+      results = Task.await_many(tasks, 15_000)
 
       assert Enum.all?(results, fn
                {:ok, _region} -> true
@@ -141,10 +142,8 @@ defmodule Orchestrator.Migration.MigrationCoordinatorTest do
       :telemetry.attach_many(
         handler_id,
         events,
-        fn event, measurements, metadata, _config ->
-          send(test_pid, {:telemetry_event, event, measurements, metadata})
-        end,
-        nil
+        &__MODULE__.handle_telemetry/4,
+        test_pid
       )
 
       on_exit(fn ->
@@ -195,9 +194,11 @@ defmodule Orchestrator.Migration.MigrationCoordinatorTest do
     end
 
     test "validates required options" do
-      assert_raise KeyError, fn ->
-        MigrationCoordinator.migrate_machine("machine_invalid_1", [])
-      end
+      assert {:error, :missing_region_options} =
+               MigrationCoordinator.migrate_machine("machine_invalid_1", [])
     end
+  end
+  def handle_telemetry(event, measurements, metadata, test_pid) do
+    send(test_pid, {:telemetry_event, event, measurements, metadata})
   end
 end

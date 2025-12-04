@@ -85,7 +85,7 @@ defmodule Orchestrator.Quota.QuotaEnforcer do
         {:reply, :ok, final_state}
 
       {:error, :rate_limited} = error ->
-        Logger.warning("Quota exceeded",
+        Logger.debug("Quota exceeded",
           org_id: org_id,
           resource_type: resource_type,
           amount: amount

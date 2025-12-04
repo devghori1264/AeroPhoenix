@@ -52,7 +52,7 @@ defmodule Orchestrator.Repo.Migrations.CreateScalingTables do
     create(index(:scaling_events, [:event_type]))
     create(index(:scaling_events, [:inserted_at]))
 
-    create table(:metric_samples, primary_key: false) do
+    create table(:scaling_metric_samples, primary_key: false) do
       add(:id, :uuid, primary_key: true)
       add(:service_name, :string, null: false)
       add(:metric_name, :string, null: false)
@@ -63,10 +63,10 @@ defmodule Orchestrator.Repo.Migrations.CreateScalingTables do
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
 
-    create(index(:metric_samples, [:service_name, :metric_name]))
-    create(index(:metric_samples, [:timestamp]))
+    create(index(:scaling_metric_samples, [:service_name, :metric_name]))
+    create(index(:scaling_metric_samples, [:timestamp]))
 
-    create table(:metric_definitions, primary_key: false) do
+    create table(:scaling_metric_definitions, primary_key: false) do
       add(:id, :uuid, primary_key: true)
       add(:name, :string, null: false)
       add(:type, :string, null: false)
@@ -79,7 +79,7 @@ defmodule Orchestrator.Repo.Migrations.CreateScalingTables do
       timestamps(type: :utc_datetime_usec)
     end
 
-    create(unique_index(:metric_definitions, [:name]))
-    create(index(:metric_definitions, [:type]))
+    create(unique_index(:scaling_metric_definitions, [:name]))
+    create(index(:scaling_metric_definitions, [:type]))
   end
 end

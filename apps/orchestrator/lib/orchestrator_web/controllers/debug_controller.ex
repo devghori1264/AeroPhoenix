@@ -1,7 +1,7 @@
 defmodule OrchestratorWeb.DebugController do
   use OrchestratorWeb, :controller
   require Logger
-  alias Orchestrator.{Repo, Machine}
+  alias Orchestrator.{Repo, Machines.Machine}
 
   def metrics(conn, %{"id" => machine_id}) do
     case Repo.get(Machine, machine_id) do

@@ -26,7 +26,7 @@ config :orchestrator, Oban,
      ]}
   ]
 
-config :logger, level: :info
+config :logger, level: :warning
 
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",

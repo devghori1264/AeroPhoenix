@@ -1,6 +1,6 @@
 defmodule Orchestrator.LiveMigration.Checkpointer do
   require Logger
-  alias Orchestrator.FlydClient
+  @flyd_client Application.compile_env(:orchestrator, :flyd_client, Orchestrator.FlydClient)
   @type checkpoint_id :: String.t()
   @type checkpoint_type :: :full | :incremental | :differential
   @type checkpoint_metadata :: %{
@@ -18,6 +18,14 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
   @spec create_checkpoint(String.t(), String.t(), map()) ::
           {:ok, checkpoint_id(), checkpoint_metadata()} | {:error, term()}
   def create_checkpoint(machine_id, region, opts \\ %{}) do
+    opts =
+      cond do
+        is_map(opts) -> opts
+        is_list(opts) -> Map.new(opts)
+        is_atom(opts) -> %{type: opts}
+        true -> %{}
+      end
+
     checkpoint_id = generate_checkpoint_id()
     checkpoint_type = Map.get(opts, :type, :full)
 
@@ -52,22 +60,21 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
         end
 
       checksum = :crypto.hash(:sha256, final_data) |> Base.encode16(case: :lower)
+      duration = System.monotonic_time(:millisecond) - start_time
 
-      case store_checkpoint(checkpoint_id, final_data) do
+      metadata = %{
+        checkpoint_id: checkpoint_id,
+        machine_id: machine_id,
+        type: checkpoint_type,
+        size_bytes: byte_size(:erlang.term_to_binary(checkpoint_data)),
+        compressed_size_bytes: compressed_size,
+        checksum: checksum,
+        created_at: DateTime.utc_now(),
+        parent_checkpoint_id: Map.get(opts, :parent_checkpoint_id) || Map.get(opts, :base_checkpoint)
+      }
+
+      case store_checkpoint(checkpoint_id, final_data, metadata) do
         :ok ->
-          duration = System.monotonic_time(:millisecond) - start_time
-
-          metadata = %{
-            checkpoint_id: checkpoint_id,
-            machine_id: machine_id,
-            type: checkpoint_type,
-            size_bytes: byte_size(:erlang.term_to_binary(checkpoint_data)),
-            compressed_size_bytes: compressed_size,
-            checksum: checksum,
-            created_at: DateTime.utc_now(),
-            parent_checkpoint_id: Map.get(opts, :parent_checkpoint_id)
-          }
-
           Logger.info("Checkpoint created successfully",
             checkpoint_id: checkpoint_id,
             size_mb: Float.round(metadata.size_bytes / 1_048_576, 2),
@@ -177,7 +184,7 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
           {:ok, checkpoint_metadata()} | {:error, :not_found}
   def get_checkpoint_info(checkpoint_id) do
     case :ets.lookup(:checkpoints, checkpoint_id) do
-      [{^checkpoint_id, metadata}] ->
+      [{^checkpoint_id, metadata, _data}] ->
         {:ok, metadata}
 
       [] ->
@@ -188,7 +195,7 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
   defp capture_memory_state(machine_id, region, _opts) do
     Logger.debug("Capturing memory state", machine_id: machine_id)
 
-    case FlydClient.get_machine_memory_dump(region, machine_id) do
+    case @flyd_client.get_machine_memory_dump(region, machine_id) do
       {:ok, memory_dump} ->
         {:ok,
          %{
@@ -196,17 +203,6 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
            stack: memory_dump["stack"],
            dirty_pages: memory_dump["dirty_pages"] || [],
            total_pages: memory_dump["total_pages"] || 0
-         }}
-
-      {:error, :not_implemented} ->
-        Logger.debug("Memory dump not available, using basic info")
-
-        {:ok,
-         %{
-           heap: nil,
-           stack: nil,
-           dirty_pages: [],
-           total_pages: 0
          }}
 
       error ->
@@ -217,17 +213,13 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
   defp capture_filesystem_state(machine_id, region, _opts) do
     Logger.debug("Capturing filesystem state", machine_id: machine_id)
 
-    case FlydClient.create_fs_snapshot(region, machine_id) do
+    case @flyd_client.create_fs_snapshot(region, machine_id) do
       {:ok, snapshot_id} ->
         {:ok,
          %{
            snapshot_id: snapshot_id,
            snapshot_type: :cow
          }}
-
-      {:error, :not_implemented} ->
-        Logger.debug("FS snapshot not available, using file list")
-        {:ok, %{snapshot_id: nil, snapshot_type: :file_list}}
 
       error ->
         error
@@ -237,7 +229,7 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
   defp capture_network_state(machine_id, region, _opts) do
     Logger.debug("Capturing network state", machine_id: machine_id)
 
-    case FlydClient.get_machine_network_state(region, machine_id) do
+    case @flyd_client.get_machine_network_state(region, machine_id) do
       {:ok, network_state} ->
         {:ok,
          %{
@@ -245,10 +237,6 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
            listening_ports: network_state["listening_ports"] || [],
            socket_buffers: network_state["socket_buffers"] || []
          }}
-
-      {:error, :not_implemented} ->
-        Logger.debug("Network state capture not available")
-        {:ok, %{connections: [], listening_ports: [], socket_buffers: []}}
 
       error ->
         error
@@ -258,13 +246,9 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
   defp capture_application_state(machine_id, region, _opts) do
     Logger.debug("Capturing application state", machine_id: machine_id)
 
-    case FlydClient.get_machine_app_state(region, machine_id) do
+    case @flyd_client.get_machine_app_state(region, machine_id) do
       {:ok, app_state} ->
         {:ok, app_state}
-
-      {:error, :not_implemented} ->
-        Logger.debug("Application state capture not available")
-        {:ok, %{}}
 
       error ->
         error
@@ -275,7 +259,7 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
     Logger.debug("Restoring filesystem state", machine_id: machine_id)
 
     if fs_state.snapshot_id do
-      FlydClient.restore_fs_snapshot(target_region, machine_id, fs_state.snapshot_id)
+      @flyd_client.restore_fs_snapshot(target_region, machine_id, fs_state.snapshot_id)
     else
       {:ok, :skipped}
     end
@@ -285,7 +269,7 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
     Logger.debug("Restoring memory state", machine_id: machine_id)
 
     if memory_state.heap do
-      FlydClient.restore_machine_memory(target_region, machine_id, memory_state)
+      @flyd_client.restore_machine_memory(target_region, machine_id, memory_state)
     else
       {:ok, :skipped}
     end
@@ -293,12 +277,12 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
 
   defp restore_network_state(network_state, machine_id, target_region) do
     Logger.debug("Restoring network state", machine_id: machine_id)
-    FlydClient.restore_machine_network_state(target_region, machine_id, network_state)
+    @flyd_client.restore_machine_network_state(target_region, machine_id, network_state)
   end
 
   defp restore_application_state(app_state, machine_id, target_region) do
     Logger.debug("Restoring application state", machine_id: machine_id)
-    FlydClient.restore_machine_app_state(target_region, machine_id, app_state)
+    @flyd_client.restore_machine_app_state(target_region, machine_id, app_state)
   end
 
   defp compress_checkpoint(data, level) do
@@ -333,15 +317,15 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
     end
   end
 
-  defp store_checkpoint(checkpoint_id, data) do
-    :ets.insert(:checkpoints, {checkpoint_id, data})
+  defp store_checkpoint(checkpoint_id, data, metadata) do
+    :ets.insert(:checkpoints, {checkpoint_id, metadata, data})
     Logger.debug("Checkpoint stored", checkpoint_id: checkpoint_id)
     :ok
   end
 
   defp load_checkpoint(checkpoint_id) do
     case :ets.lookup(:checkpoints, checkpoint_id) do
-      [{^checkpoint_id, data}] ->
+      [{^checkpoint_id, _metadata, data}] ->
         {:ok, data}
 
       [] ->

@@ -159,7 +159,7 @@ defmodule Orchestrator.Quota.QuotaEnforcerTest do
     test "emits rate_limited event when quota exceeded" do
       org_id = "org_telemetry_limited_1"
 
-      for _i <- 1..1000 do
+      for _i <- 1..2000 do
         QuotaEnforcer.check_api_quota(org_id, "/api/machines")
       end
 

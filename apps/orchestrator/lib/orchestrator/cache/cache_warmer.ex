@@ -5,7 +5,8 @@ defmodule Orchestrator.Cache.CacheWarmer do
   @type state :: %{
           warming_in_progress: boolean(),
           last_warmup_at: integer() | nil,
-          entries_loaded: non_neg_integer()
+          entries_loaded: non_neg_integer(),
+          query_cache_name: atom()
         }
 
   @warmup_batch_size 100
@@ -28,14 +29,17 @@ defmodule Orchestrator.Cache.CacheWarmer do
   end
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
+    query_cache_name = Keyword.get(opts, :query_cache_name, :query_cache)
+
     state = %{
       warming_in_progress: false,
       last_warmup_at: nil,
-      entries_loaded: 0
+      entries_loaded: 0,
+      query_cache_name: query_cache_name
     }
 
-    Logger.info("CacheWarmer started")
+    Logger.info("CacheWarmer started", query_cache_name: query_cache_name)
 
     {:ok, state}
   end
@@ -46,7 +50,7 @@ defmodule Orchestrator.Cache.CacheWarmer do
       Logger.warning("Cache warming already in progress, ignoring request")
       {:noreply, state}
     else
-      spawn_link(fn -> perform_cache_warming() end)
+      spawn_link(fn -> perform_cache_warming(state.query_cache_name) end)
 
       Process.send_after(self(), :refresh_cache, @background_refresh_interval_ms)
 
@@ -90,14 +94,14 @@ defmodule Orchestrator.Cache.CacheWarmer do
 
   @impl true
   def handle_info(:refresh_cache, state) do
-    spawn_link(fn -> perform_background_refresh() end)
+    spawn_link(fn -> perform_background_refresh(state.query_cache_name) end)
 
     Process.send_after(self(), :refresh_cache, @background_refresh_interval_ms)
 
     {:noreply, state}
   end
 
-  defp perform_cache_warming do
+  defp perform_cache_warming(query_cache_name) do
     parent = self()
     start_time = System.monotonic_time(:millisecond)
 
@@ -113,7 +117,7 @@ defmodule Orchestrator.Cache.CacheWarmer do
       |> Enum.chunk_every(@warmup_batch_size)
       |> Enum.with_index()
       |> Enum.reduce(0, fn {batch, batch_idx}, acc ->
-        preload_batch(batch)
+        preload_batch(query_cache_name, batch)
 
         loaded = acc + length(batch)
 
@@ -152,11 +156,12 @@ defmodule Orchestrator.Cache.CacheWarmer do
     end
   end
 
-  defp preload_batch(machines) do
+  defp preload_batch(query_cache_name, machines) do
     Enum.each(machines, fn machine ->
       ttl_ms = calculate_ttl(machine.access_count)
 
       Orchestrator.Cache.QueryCache.put(
+        query_cache_name,
         machine.id,
         machine,
         ttl_ms: ttl_ms
@@ -173,7 +178,7 @@ defmodule Orchestrator.Cache.CacheWarmer do
     end
   end
 
-  defp perform_background_refresh do
+  defp perform_background_refresh(query_cache_name) do
     Logger.debug("Starting background cache refresh")
 
     current_hot = get_hot_machines()
@@ -186,7 +191,7 @@ defmodule Orchestrator.Cache.CacheWarmer do
     cold_count = MapSet.size(cold_in_cache)
 
     Enum.each(cold_in_cache, fn machine_id ->
-      Orchestrator.Cache.QueryCache.delete(machine_id)
+      Orchestrator.Cache.QueryCache.delete(query_cache_name, machine_id)
     end)
 
     new_hot_ids = MapSet.difference(current_hot_ids, cached_ids)
@@ -196,7 +201,7 @@ defmodule Orchestrator.Cache.CacheWarmer do
       |> Enum.filter(fn m -> MapSet.member?(new_hot_ids, m.id) end)
       |> Enum.take(1000)
 
-    preload_batch(new_hot_machines)
+    preload_batch(query_cache_name, new_hot_machines)
 
     new_hot_count = length(new_hot_machines)
 

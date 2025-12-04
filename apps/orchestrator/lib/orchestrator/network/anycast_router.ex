@@ -92,7 +92,7 @@ defmodule Orchestrator.Network.AnycastRouter do
       read_concurrency: true
     ])
 
-    Logger.info("Anycast Router started", table: @table_name)
+    Logger.debug("Anycast Router started", table: @table_name)
 
     {:ok, %{}}
   end
@@ -103,7 +103,7 @@ defmodule Orchestrator.Network.AnycastRouter do
 
     :ets.insert(@table_name, {ipv6, machine_id, region, node(), :announced})
 
-    Logger.info("BGP ANNOUNCE",
+    Logger.debug("BGP ANNOUNCE",
       ipv6: ipv6,
       machine_id: machine_id,
       region: region,
@@ -129,7 +129,7 @@ defmodule Orchestrator.Network.AnycastRouter do
       :ets.delete_object(@table_name, {ipv6, machine_id, region, node_name, :announced})
     end)
 
-    Logger.info("BGP WITHDRAW", ipv6: ipv6, region: region)
+    Logger.debug("BGP WITHDRAW", ipv6: ipv6, region: region)
 
     remaining = :ets.match(@table_name, {ipv6, :"$1", :"$2", :"$3", :announced})
 

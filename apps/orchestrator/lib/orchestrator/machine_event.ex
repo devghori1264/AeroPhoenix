@@ -2,6 +2,7 @@ defmodule Orchestrator.MachineEvent do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @primary_key {:id, :binary_id, autogenerate: true}
   @timestamps_opts [type: :utc_datetime_usec]
 
   schema "machine_events" do
