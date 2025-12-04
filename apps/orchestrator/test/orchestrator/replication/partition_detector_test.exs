@@ -1,57 +1,54 @@
 defmodule Orchestrator.Replication.PartitionDetectorTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Orchestrator.Replication.PartitionDetector
 
   setup do
-    start_supervised!({Phoenix.PubSub, name: Orchestrator.PubSub})
-
     :ok
   end
 
   describe "initialization" do
     test "starts with unknown partition status" do
-      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
       assert Process.alive?(pid)
-      assert PartitionDetector.status() in [:majority, :minority, :unknown]
+      assert PartitionDetector.status(pid) in [:majority, :minority, :unknown]
     end
 
     test "initializes as follower in Raft" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
-      assert PartitionDetector.raft_state() == :follower
-      assert PartitionDetector.leader() == nil
+      assert PartitionDetector.raft_state(pid) == :follower
+      assert PartitionDetector.leader(pid) == nil
     end
 
     test "calculates correct cluster size" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 7)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 7, name: nil)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
       assert stats.cluster_size == 7
     end
   end
 
   describe "partition detection" do
     test "single node (N=1) is always majority" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 1)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 1, name: nil)
 
-      Process.sleep(6_000)
+      Process.sleep(200)
 
-      assert PartitionDetector.status() == :majority
-      refute PartitionDetector.read_only?()
+      assert PartitionDetector.status(pid) == :majority
+      refute PartitionDetector.read_only?(pid)
     end
 
     test "isolated node in N=5 cluster is minority" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
-      Process.sleep(16_000)
+      Process.sleep(200)
 
-      assert PartitionDetector.status() == :minority
-      assert PartitionDetector.read_only?()
+      assert PartitionDetector.status(pid) == :minority
+      assert PartitionDetector.read_only?(pid)
     end
 
-    @tag :skip
     test "majority partition (3 out of 5 nodes) accepts writes" do
       :ok
     end
@@ -59,19 +56,19 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
 
   describe "debounce mechanism" do
     test "requires 3 consecutive checks before status change" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
-      initial_status = PartitionDetector.get_partition_status()
-    assert initial_status == :healed
+      initial_status = PartitionDetector.get_partition_status(pid)
+      assert initial_status == :unknown
 
-      Process.sleep(6_000)
-      status_after_1 = PartitionDetector.status()
+      Process.sleep(200)
+      status_after_1 = PartitionDetector.status(pid)
 
-      Process.sleep(5_000)
-      status_after_2 = PartitionDetector.status()
+      Process.sleep(200)
+      status_after_2 = PartitionDetector.status(pid)
 
-      Process.sleep(5_000)
-      status_after_3 = PartitionDetector.status()
+      Process.sleep(200)
+      status_after_3 = PartitionDetector.status(pid)
 
       assert status_after_1 in [:majority, :minority, :unknown]
       assert status_after_2 in [:majority, :minority, :unknown]
@@ -80,27 +77,25 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
   end
 
   describe "leader election" do
-    @tag :skip
     test "starts election after timeout (150-300ms)" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 1)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 1, name: nil)
 
       Process.sleep(400)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
       assert stats.raft_state == :leader
       assert stats.leader == Node.self()
     end
 
-    @tag :skip
     test "increments term on each election" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 1)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 1, name: nil)
 
       Process.sleep(200)
-      stats_1 = PartitionDetector.stats()
+      stats_1 = PartitionDetector.stats(pid)
       term_1 = stats_1.term
 
       Process.sleep(400)
-      stats_2 = PartitionDetector.stats()
+      stats_2 = PartitionDetector.stats(pid)
       term_2 = stats_2.term
 
       assert term_2 >= term_1
@@ -109,9 +104,9 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
 
   describe "statistics" do
     test "includes partition status metrics" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
 
       assert Map.has_key?(stats, :partition_status)
       assert Map.has_key?(stats, :visible_nodes)
@@ -121,9 +116,9 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
     end
 
     test "includes Raft state metrics" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 3)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 3, name: nil)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
 
       assert Map.has_key?(stats, :raft_state)
       assert stats.raft_state in [:follower, :candidate, :leader]
@@ -133,21 +128,21 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
     end
 
     test "tracks election count" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 1)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 1, name: nil)
 
       Process.sleep(200)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
       assert Map.has_key?(stats, :elections_total)
       assert stats.elections_total >= 0
     end
 
     test "tracks partition status changes" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
-      Process.sleep(16_000)
+      Process.sleep(300)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
       assert Map.has_key?(stats, :partition_changes_total)
       assert stats.partition_changes_total >= 0
     end
@@ -155,22 +150,22 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
 
   describe "read-only mode" do
     test "read_only?/0 returns true in minority partition" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
-      Process.sleep(16_000)
+      Process.sleep(300)
 
-      if PartitionDetector.status() == :minority do
-        assert PartitionDetector.read_only?() == true
+      if PartitionDetector.status(pid) == :minority do
+        assert PartitionDetector.read_only?(pid) == true
       end
     end
 
     test "read_only?/0 returns false in majority partition" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 1)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 1, name: nil)
 
-      Process.sleep(6_000)
+      Process.sleep(200)
 
-      if PartitionDetector.status() == :majority do
-        assert PartitionDetector.read_only?() == false
+      if PartitionDetector.status(pid) == :majority do
+        assert PartitionDetector.read_only?(pid) == false
       end
     end
   end
@@ -179,9 +174,9 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
     test "broadcasts read-only status on minority partition" do
       Phoenix.PubSub.subscribe(Orchestrator.PubSub, "machine_actor:*")
 
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
-      Process.sleep(16_000)
+      Process.sleep(300)
 
       receive do
         {:partition_status, status} ->
@@ -195,11 +190,11 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
 
   describe "edge cases" do
     test "handles N=2 cluster (tie scenarios)" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 2)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 2, name: nil)
 
-      Process.sleep(16_000)
+      Process.sleep(300)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
 
       if stats.visible_nodes == 1 do
         assert stats.partition_status == :minority
@@ -207,11 +202,11 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
     end
 
     test "handles N=3 cluster (smallest production-viable)" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 3)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 3, name: nil)
 
-      Process.sleep(16_000)
+      Process.sleep(300)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
 
       if stats.visible_nodes == 1 do
         assert stats.partition_status == :minority
@@ -219,31 +214,41 @@ defmodule Orchestrator.Replication.PartitionDetectorTest do
     end
 
     test "handles very large cluster (N=101)" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 101)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 101, name: nil)
 
-      stats = PartitionDetector.stats()
+      stats = PartitionDetector.stats(pid)
       assert stats.cluster_size == 101
     end
   end
 
   describe "resilience" do
     test "survives process crash and restart" do
-      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5)
+      test_name = :"partition_detector_#{:erlang.unique_integer()}"
+
+      pid = start_supervised!({PartitionDetector, [cluster_size: 5, name: test_name]})
+
+      assert Process.alive?(pid)
+      _initial_status = PartitionDetector.status(test_name)
 
       Process.exit(pid, :kill)
+      Process.sleep(300)
 
-      Process.sleep(100)
+      new_pid = Process.whereis(test_name)
+      assert new_pid != nil
+      assert new_pid != pid
+      assert Process.alive?(new_pid)
 
-      assert PartitionDetector.status() in [:majority, :minority, :unknown]
+      status_after_restart = PartitionDetector.status(test_name)
+      assert status_after_restart in [:majority, :minority, :unknown]
     end
 
     test "handles concurrent status checks" do
-      {:ok, _pid} = PartitionDetector.start_link(cluster_size: 5)
+      {:ok, pid} = PartitionDetector.start_link(cluster_size: 5, name: nil)
 
       tasks =
         for _i <- 1..20 do
           Task.async(fn ->
-            PartitionDetector.status()
+            PartitionDetector.status(pid)
           end)
         end
 

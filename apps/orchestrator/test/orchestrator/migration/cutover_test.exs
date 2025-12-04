@@ -6,12 +6,35 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
   @moduletag :cutover_coordinator
 
   setup do
-    RoutingTable.init()
+    start_supervised!(Orchestrator.FlydSim)
+    
+    if :ets.info(:routing_table) == :undefined do
+      RoutingTable.init()
+    end
+
+    start_supervised!({Orchestrator.Migration.CutoverCoordinator, []}, restart: :temporary)
 
     on_exit(fn ->
       RoutingTable.all()
       |> Enum.each(fn {machine_id, _} ->
         RoutingTable.delete(machine_id)
+      end)
+
+      Orchestrator.MachineRegistry.list_machine_ids()
+      |> Enum.each(fn machine_id ->
+        case Orchestrator.MachineRegistry.get_pid(machine_id) do
+          {:ok, pid} when is_pid(pid) ->
+            if Process.alive?(pid) do
+              try do
+                Orchestrator.MachineActor.stop(pid)
+              catch
+                :exit, _ -> :ok
+              end
+            end
+
+          _ ->
+            :ok
+        end
       end)
     end)
 
@@ -20,8 +43,9 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
 
   describe "execute_cutover/1" do
     test "successfully executes 4-step cutover sequence" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
       {:ok, stats} =
@@ -39,13 +63,15 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
       assert stats.step3_start_dest_ms > 0
       assert stats.step4_routing_ms > 0
 
-      {:ok, route} = RoutingTable.lookup("machine_123")
+      base_id = String.replace(source, "_iad", "")
+      {:ok, route} = RoutingTable.lookup(base_id)
       assert route.region == :lhr
     end
 
     test "cutover completes within reasonable time" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
       start_time = System.monotonic_time(:millisecond)
@@ -65,8 +91,9 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
     end
 
     test "handles checksum verification" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
       {:ok, stats} =
@@ -81,14 +108,31 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
     end
 
     test "emits telemetry events" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
       events_ref =
         :telemetry_test.attach_event_handlers(self(), [
           [:orchestrator, :migration, :cutover_complete]
         ])
+
+      IO.inspect(Orchestrator.MachineRegistry.get_pid(dest), label: "DEBUG: get_pid(#{dest})")
+      case Orchestrator.MachineRegistry.get_pid(dest) do
+        {:ok, pid} ->
+          IO.puts("DEBUG: Terminating existing dest machine #{inspect(pid)}")
+          DynamicSupervisor.terminate_child(Orchestrator.MachineActor.Supervisor, pid)
+          ref = Process.monitor(pid)
+          receive do
+            {:DOWN, ^ref, :process, ^pid, _} -> :ok
+          after
+            1000 -> :ok
+          end
+        {:error, reason} ->
+          IO.puts("DEBUG: Could not find dest machine: #{inspect(reason)}")
+          :ok
+      end
 
       {:ok, _stats} =
         CutoverCoordinator.execute_cutover(
@@ -108,8 +152,9 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
     end
 
     test "tracks individual step durations" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
       {:ok, stats} =
@@ -136,8 +181,9 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
 
   describe "cutover timing precision" do
     test "provides microsecond-level timing" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
       {:ok, stats} =
@@ -154,11 +200,13 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
 
   describe "routing update verification" do
     test "routing points to destination after cutover" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
-      assert {:error, :not_found} = RoutingTable.lookup("machine_123")
+      base_id = String.replace(source, "_iad", "")
+      assert {:error, :not_found} = RoutingTable.lookup(base_id)
 
       {:ok, _stats} =
         CutoverCoordinator.execute_cutover(
@@ -167,15 +215,16 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
           migration_id: migration_id
         )
 
-      {:ok, route} = RoutingTable.lookup("machine_123")
+      {:ok, route} = RoutingTable.lookup(base_id)
       assert route.region == :lhr
       assert route.ip == "192.168.2.20"
       assert route.port == 8080
     end
 
     test "routing update is atomic" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
       test_pid = self()
@@ -191,9 +240,10 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
         send(test_pid, {:cutover_complete, result})
       end)
 
+      base_id = String.replace(source, "_iad", "")
       routes_observed =
         for _ <- 1..20 do
-          case RoutingTable.lookup("machine_123") do
+          case RoutingTable.lookup(base_id) do
             {:ok, route} -> route.region
             {:error, :not_found} -> :not_found
           end
@@ -341,7 +391,8 @@ defmodule Orchestrator.Migration.RoutingUpdaterTest do
       dest = "machine_123_lhr"
       migration_id = "migration_#{:rand.uniform(100_000)}"
 
-      assert {:error, :not_found} = RoutingTable.lookup("machine_123")
+      base_id = String.replace(source, "_iad", "")
+      assert {:error, :not_found} = RoutingTable.lookup(base_id)
 
       :ok =
         RoutingUpdater.update_route(
@@ -350,7 +401,7 @@ defmodule Orchestrator.Migration.RoutingUpdaterTest do
           migration_id
         )
 
-      {:ok, route} = RoutingTable.lookup("machine_123")
+      {:ok, route} = RoutingTable.lookup(base_id)
       assert route.ip == "192.168.2.20"
       assert route.region == :lhr
     end
@@ -396,7 +447,8 @@ defmodule Orchestrator.Migration.RoutingUpdaterTest do
                      1000
 
       assert metadata.migration_id == migration_id
-      assert metadata.machine_id == "machine_123"
+      base_id = String.replace(source, "_iad", "")
+      assert metadata.machine_id == base_id
       assert metadata.new_region == :lhr
 
       :telemetry.detach(events_ref)
@@ -431,18 +483,20 @@ defmodule Orchestrator.Migration.RoutingUpdaterTest do
 
   describe "rollback_route/2" do
     test "restores previous routing" do
-      source = "machine_123_iad"
-      dest = "machine_123_lhr"
+      rand_id = :rand.uniform(100_000)
+      source = "machine_#{rand_id}_iad"
+      dest = "machine_#{rand_id}_lhr"
       migration_id = "migration_test"
 
       :ok = RoutingUpdater.update_route(source, dest, migration_id)
 
-      {:ok, route} = RoutingTable.lookup("machine_123")
+      base_id = String.replace(source, "_iad", "")
+      {:ok, route} = RoutingTable.lookup(base_id)
       assert route.region == :lhr
 
       :ok = RoutingUpdater.rollback_route(source, migration_id)
 
-      {:ok, route} = RoutingTable.lookup("machine_123")
+      {:ok, route} = RoutingTable.lookup(base_id)
       assert route.region == :iad
     end
   end

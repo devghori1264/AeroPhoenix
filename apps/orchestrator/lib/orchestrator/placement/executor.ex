@@ -3,8 +3,10 @@ defmodule Orchestrator.Placement.Executor do
   require Logger
 
   def init(_), do: {:ok, %{}}
-  alias Orchestrator.{Repo, Machine, FlydClient}
+  alias Orchestrator.Repo
+  alias Orchestrator.Machines.Machine
   alias Orchestrator.Events.Writer, as: EventWriter
+  @flyd_client Application.compile_env(:orchestrator, :flyd_client, Orchestrator.FlydClient)
   import Ecto.Query
   @type execution_mode :: :dry_run | :progressive | :atomic | :staged
   @type execution_result :: %{
@@ -37,7 +39,7 @@ defmodule Orchestrator.Placement.Executor do
   @spec apply_cost_optimization(list(map()), keyword()) ::
           {:ok, execution_result()} | {:error, any()}
   def apply_cost_optimization(recommendations, opts \\ []) do
-    Logger.info("Applying cost optimization recommendations",
+    Logger.info("Applying cost optimization recommendations with client: #{inspect(@flyd_client)}",
       count: length(recommendations),
       mode: opts[:mode] || :dry_run
     )
@@ -51,7 +53,7 @@ defmodule Orchestrator.Placement.Executor do
       {:ok, result}
     else
       {:error, reason} = error ->
-        Logger.error("Cost optimization execution failed", reason: inspect(reason))
+        Logger.info("Cost optimization execution failed", reason: inspect(reason))
         error
     end
   end
@@ -73,7 +75,7 @@ defmodule Orchestrator.Placement.Executor do
       {:ok, result}
     else
       {:error, reason} = error ->
-        Logger.error("Latency optimization execution failed", reason: inspect(reason))
+        Logger.info("Latency optimization execution failed", reason: inspect(reason))
         error
     end
   end
@@ -91,7 +93,7 @@ defmodule Orchestrator.Placement.Executor do
       {:ok, result}
     else
       {:error, reason} = error ->
-        Logger.error("Placement execution failed",
+        Logger.info("Placement execution failed",
           recommendation: inspect(recommendation),
           reason: inspect(reason)
         )
@@ -102,7 +104,7 @@ defmodule Orchestrator.Placement.Executor do
 
   @spec rollback_execution(String.t(), keyword()) :: {:ok, map()} | {:error, any()}
   def rollback_execution(execution_id, opts \\ []) do
-    Logger.warning("Rolling back execution", execution_id: execution_id)
+    Logger.info("Rolling back execution", execution_id: execution_id)
 
     with {:ok, checkpoints} <- load_execution_checkpoints(execution_id),
          {:ok, result} <- perform_rollback(checkpoints, opts) do
@@ -114,7 +116,7 @@ defmodule Orchestrator.Placement.Executor do
       {:ok, result}
     else
       {:error, reason} = error ->
-        Logger.error("Rollback failed",
+        Logger.info("Rollback failed",
           execution_id: execution_id,
           reason: inspect(reason)
         )
@@ -177,18 +179,23 @@ defmodule Orchestrator.Placement.Executor do
   defp validate_latency_placements(placements) do
     Logger.debug("Validating latency placements", count: length(placements))
 
-    errors =
-      Enum.reduce(placements, [], fn placement, acc ->
+    {valid, invalid} =
+      Enum.reduce(placements, {[], []}, fn placement, {v, i} ->
         case validate_latency_placement(placement) do
-          :ok -> acc
-          {:error, reason} -> [{placement, reason} | acc]
+          :ok ->
+            enhanced_placement = Map.put_new(placement, :type, :migrate)
+            {[enhanced_placement | v], i}
+
+          {:error, reason} ->
+            {v, [{placement, reason} | i]}
         end
       end)
 
-    if Enum.empty?(errors) do
-      {:ok, placements}
+    if Enum.empty?(invalid) do
+      {:ok, Enum.reverse(valid)}
     else
-      {:error, {:validation_failed, errors}}
+      Logger.info("Validation failed: #{inspect(invalid)}")
+      {:error, {:validation_failed, Enum.reverse(invalid)}}
     end
   end
 
@@ -310,7 +317,11 @@ defmodule Orchestrator.Placement.Executor do
   end
 
   defp maybe_validate_placement(recommendation, true = _validate?, false = _force?) do
-    validate_latency_placement(recommendation)
+    if Map.has_key?(recommendation, :latency_improvement_ms) do
+      validate_latency_placement(recommendation)
+    else
+      validate_cost_recommendation(recommendation)
+    end
   end
 
   defp maybe_validate_placement(_recommendation, false = _validate?, _force?), do: :ok
@@ -464,13 +475,13 @@ defmodule Orchestrator.Placement.Executor do
 
             {:error, reason} ->
               if execution.auto_rollback do
-                Logger.warning("Batch failed, initiating rollback",
+                Logger.info("Batch failed, initiating rollback",
                   execution_id: execution.execution_id,
                   reason: inspect(reason)
                 )
 
-                rollback_result = perform_rollback(acc.snapshots, [])
-                {:halt, {:rollback_triggered, rollback_result}}
+                {:ok, rollback_data} = perform_rollback(acc.snapshots, [])
+                {:halt, {:rollback_triggered, rollback_data}}
               else
                 {:halt, {:failed, reason, acc}}
               end
@@ -583,7 +594,7 @@ defmodule Orchestrator.Placement.Executor do
       strategy: strategy
     )
 
-    case FlydClient.migrate_machine(machine_id, target_region, strategy: strategy) do
+    case @flyd_client.migrate_machine(machine_id, target_region, strategy: strategy) do
       {:ok, result} ->
         {:ok,
          %{
@@ -611,9 +622,9 @@ defmodule Orchestrator.Placement.Executor do
       target_memory: specs[:memory_mb]
     )
 
-    with {:ok, _} <- FlydClient.stop_machine(machine_id),
+    with {:ok, _} <- @flyd_client.stop_machine(machine_id),
          {:ok, _machine} <- update_machine_specs(machine_id, specs),
-         {:ok, _} <- FlydClient.start_machine(machine_id) do
+         {:ok, _} <- @flyd_client.start_machine(machine_id) do
       {:ok,
        %{
          action: :rightsize,
@@ -762,7 +773,7 @@ defmodule Orchestrator.Placement.Executor do
   end
 
   defp perform_rollback(snapshots, _opts) do
-    Logger.warning("Performing rollback", machine_count: map_size(snapshots))
+    Logger.info("Performing rollback", machine_count: map_size(snapshots))
 
     results =
       Enum.map(snapshots, fn {machine_id, snapshot} ->

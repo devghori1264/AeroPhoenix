@@ -2,7 +2,6 @@ defmodule Orchestrator.Replication.PartitionDetector do
   use GenServer
   require Logger
 
-  @check_interval_ms 5_000
   @debounce_checks 3
   @election_timeout_min_ms 150
   @election_timeout_max_ms 300
@@ -31,32 +30,38 @@ defmodule Orchestrator.Replication.PartitionDetector do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @spec status() :: partition_status()
-  def status do
-    GenServer.call(__MODULE__, :status)
+  @spec status(GenServer.server()) :: partition_status()
+  def status(server \\ __MODULE__) do
+    GenServer.call(server, :status)
   end
 
-  @spec raft_state() :: raft_state()
-  def raft_state do
-    GenServer.call(__MODULE__, :raft_state)
+  @spec get_partition_status(GenServer.server()) :: partition_status()
+  def get_partition_status(server \\ __MODULE__) do
+    status(server)
   end
 
-  @spec leader() :: atom() | nil
-  def leader do
-    GenServer.call(__MODULE__, :leader)
+  @spec raft_state(GenServer.server()) :: raft_state()
+  def raft_state(server \\ __MODULE__) do
+    GenServer.call(server, :raft_state)
   end
 
-  @spec read_only?() :: boolean()
-  def read_only? do
-    status() == :minority
+  @spec leader(GenServer.server()) :: atom() | nil
+  def leader(server \\ __MODULE__) do
+    GenServer.call(server, :leader)
   end
 
-  @spec stats() :: map()
-  def stats do
-    GenServer.call(__MODULE__, :stats)
+  @spec read_only?(GenServer.server()) :: boolean()
+  def read_only?(server \\ __MODULE__) do
+    status(server) == :minority
+  end
+
+  @spec stats(GenServer.server()) :: map()
+  def stats(server \\ __MODULE__) do
+    GenServer.call(server, :stats)
   end
 
   @impl true
@@ -64,12 +69,14 @@ defmodule Orchestrator.Replication.PartitionDetector do
     cluster_size = Keyword.fetch!(opts, :cluster_size)
     node_id = Keyword.get(opts, :node_id, Node.self())
 
+    initial_status = if cluster_size == 1, do: :majority, else: :unknown
+
     state = %{
       node_id: node_id,
       cluster_size: cluster_size,
-      partition_status: :unknown,
-      debounce_count: 0,
-      last_status: :unknown,
+      partition_status: initial_status,
+      debounce_count: if(cluster_size == 1, do: 3, else: 0),
+      last_status: initial_status,
       raft_state: :follower,
       term: 0,
       leader: nil,
@@ -187,9 +194,19 @@ defmodule Orchestrator.Replication.PartitionDetector do
   end
 
   @impl true
+  def handle_info({:vote_result, _vote_id, _result}, state) do
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({:heartbeat, from_node, leader_term}, state) do
     new_state = handle_heartbeat(from_node, leader_term, state)
     {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info(_msg, state) do
+    {:noreply, state}
   end
 
   defp check_partition_status(state) do
@@ -487,11 +504,15 @@ defmodule Orchestrator.Replication.PartitionDetector do
   end
 
   defp schedule_partition_check do
-    Process.send_after(self(), :partition_check, @check_interval_ms)
+    Process.send_after(self(), :partition_check, check_interval())
   end
 
   defp schedule_election_timeout_check do
     Process.send_after(self(), :election_timeout_check, 50)
+  end
+
+  defp check_interval do
+    Application.get_env(:orchestrator, :partition_check_interval, 5_000)
   end
 
   defp schedule_heartbeat do

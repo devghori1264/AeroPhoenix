@@ -17,6 +17,9 @@ defmodule Orchestrator.Cache.PgCache do
   @type state :: %{
           replication_buffer: pid(),
           cache_warmer: pid() | nil,
+          query_cache_name: atom(),
+          l2_name: atom(),
+          l3_name: atom(),
           stats: %{
             l1_hits: non_neg_integer(),
             l2_hits: non_neg_integer(),
@@ -33,27 +36,28 @@ defmodule Orchestrator.Cache.PgCache do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @spec get(machine_id()) :: {:ok, term()} | {:error, :not_found}
-  def get(machine_id) do
-    GenServer.call(__MODULE__, {:get, machine_id})
+  @spec get(GenServer.server(), machine_id()) :: {:ok, term()} | {:error, :not_found}
+  def get(server \\ __MODULE__, machine_id) do
+    GenServer.call(server, {:get, machine_id})
   end
 
-  @spec put(machine_id(), term()) :: :ok | {:error, term()}
-  def put(machine_id, data) do
-    GenServer.call(__MODULE__, {:put, machine_id, data})
+  @spec put(GenServer.server(), machine_id(), term()) :: :ok | {:error, term()}
+  def put(server \\ __MODULE__, machine_id, data) do
+    GenServer.call(server, {:put, machine_id, data})
   end
 
-  @spec delete(machine_id()) :: :ok
-  def delete(machine_id) do
-    GenServer.call(__MODULE__, {:delete, machine_id})
+  @spec delete(GenServer.server(), machine_id()) :: :ok
+  def delete(server \\ __MODULE__, machine_id) do
+    GenServer.call(server, {:delete, machine_id})
   end
 
-  @spec stats() :: map()
-  def stats do
-    GenServer.call(__MODULE__, :stats)
+  @spec stats(GenServer.server()) :: map()
+  def stats(server \\ __MODULE__) do
+    GenServer.call(server, :stats)
   end
 
   @impl true
@@ -62,13 +66,17 @@ defmodule Orchestrator.Cache.PgCache do
     l1_size = Keyword.get(opts, :l1_cache_size, @l1_cache_size)
     debounce_ms = Keyword.get(opts, :replication_debounce_ms, @replication_debounce_ms)
 
-    QueryCache.init(max_size: l1_size, bloom_filter_size: @bloom_filter_size)
+    name = Keyword.get(opts, :query_cache_name, :query_cache)
+    l2_name = Keyword.get(opts, :l2_name, :pg_cache_l2_sim)
+    l3_name = Keyword.get(opts, :l3_name, :pg_cache_l3_sim)
+
+    QueryCache.init(name: name, max_size: l1_size, bloom_filter_size: @bloom_filter_size)
 
     {:ok, buffer_pid} = ReplicationBuffer.start_link(debounce_ms: debounce_ms)
 
     warmer_pid =
       if enable_warming do
-        {:ok, pid} = CacheWarmer.start_link()
+        {:ok, pid} = CacheWarmer.start_link(query_cache_name: name)
         CacheWarmer.warm_cache(pid)
         pid
       else
@@ -78,6 +86,9 @@ defmodule Orchestrator.Cache.PgCache do
     state = %{
       replication_buffer: buffer_pid,
       cache_warmer: warmer_pid,
+      query_cache_name: name,
+      l2_name: l2_name,
+      l3_name: l3_name,
       stats: %{
         l1_hits: 0,
         l2_hits: 0,
@@ -89,7 +100,8 @@ defmodule Orchestrator.Cache.PgCache do
 
     Logger.info("PgCache started",
       l1_size: l1_size,
-      cache_warming: enable_warming
+      cache_warming: enable_warming,
+      query_cache_name: name
     )
 
     {:ok, state}
@@ -100,25 +112,25 @@ defmodule Orchestrator.Cache.PgCache do
     start_time = System.monotonic_time(:microsecond)
 
     result =
-      case get_from_l1(machine_id) do
+      case get_from_l1(state.query_cache_name, machine_id) do
         {:ok, data} ->
           new_state = update_stats(state, :l1_hit)
           emit_metric(:l1_hit, machine_id, start_time)
           {:reply, {:ok, data}, new_state}
 
         :miss ->
-          case get_from_l2(machine_id) do
+          case get_from_l2(state.l2_name, machine_id) do
             {:ok, data} ->
-              populate_l1(machine_id, data)
+              populate_l1(state.query_cache_name, machine_id, data)
               new_state = update_stats(state, :l2_hit)
               emit_metric(:l2_hit, machine_id, start_time)
               {:reply, {:ok, data}, new_state}
 
             :miss ->
-              case get_from_l3(machine_id) do
+              case get_from_l3(state.l3_name, machine_id) do
                 {:ok, data} ->
-                  populate_l2(machine_id, data)
-                  populate_l1(machine_id, data)
+                  populate_l2(state.l2_name, machine_id, data)
+                  populate_l1(state.query_cache_name, machine_id, data)
                   new_state = update_stats(state, :l3_hit)
                   emit_metric(:l3_hit, machine_id, start_time)
                   {:reply, {:ok, data}, new_state}
@@ -136,9 +148,9 @@ defmodule Orchestrator.Cache.PgCache do
 
   @impl true
   def handle_call({:put, machine_id, data}, _from, state) do
-    case write_to_l3(machine_id, data) do
+    case write_to_l3(state.l3_name, machine_id, data) do
       :ok ->
-        invalidate_l1(machine_id)
+        invalidate_l1(state.query_cache_name, machine_id)
 
         ReplicationBuffer.enqueue(state.replication_buffer, machine_id, data)
 
@@ -148,9 +160,9 @@ defmodule Orchestrator.Cache.PgCache do
 
   @impl true
   def handle_call({:delete, machine_id}, _from, state) do
-    invalidate_l1(machine_id)
-    delete_from_l2(machine_id)
-    delete_from_l3(machine_id)
+    invalidate_l1(state.query_cache_name, machine_id)
+    delete_from_l2(state.l2_name, machine_id)
+    delete_from_l3(state.l3_name, machine_id)
 
     {:reply, :ok, state}
   end
@@ -186,10 +198,10 @@ defmodule Orchestrator.Cache.PgCache do
     {:reply, stats, state}
   end
 
-  defp get_from_l1(machine_id) do
-    case QueryCache.get(machine_id) do
+  defp get_from_l1(name, machine_id) do
+    case QueryCache.get(name, machine_id) do
       {:ok, entry} ->
-        QueryCache.record_access(machine_id)
+        QueryCache.record_access(name, machine_id)
         {:ok, entry.data}
 
       :not_found ->
@@ -197,46 +209,46 @@ defmodule Orchestrator.Cache.PgCache do
     end
   end
 
-  defp get_from_l2(machine_id) do
-    case :ets.lookup(:pg_cache_l2_sim, machine_id) do
+  defp get_from_l2(l2_name, machine_id) do
+    case :ets.lookup(l2_name, machine_id) do
       [{^machine_id, data}] -> {:ok, data}
       [] -> :miss
     end
   end
 
-  defp get_from_l3(machine_id) do
-    case :ets.lookup(:pg_cache_l3_sim, machine_id) do
+  defp get_from_l3(l3_name, machine_id) do
+    case :ets.lookup(l3_name, machine_id) do
       [{^machine_id, data}] -> {:ok, data}
       [] -> :not_found
     end
   end
 
-  defp populate_l1(machine_id, data) do
-    access_count = QueryCache.get_access_count(machine_id)
+  defp populate_l1(name, machine_id, data) do
+    access_count = QueryCache.get_access_count(name, machine_id)
     ttl_ms = adaptive_ttl(access_count)
 
-    QueryCache.put(machine_id, %{data: data}, ttl_ms: ttl_ms)
+    QueryCache.put(name, machine_id, %{data: data}, ttl_ms: ttl_ms)
   end
 
-  defp populate_l2(machine_id, data) do
-    :ets.insert(:pg_cache_l2_sim, {machine_id, data})
+  defp populate_l2(l2_name, machine_id, data) do
+    :ets.insert(l2_name, {machine_id, data})
   end
 
-  defp invalidate_l1(machine_id) do
-    QueryCache.delete(machine_id)
+  defp invalidate_l1(name, machine_id) do
+    QueryCache.delete(name, machine_id)
   end
 
-  defp write_to_l3(machine_id, data) do
-    :ets.insert(:pg_cache_l3_sim, {machine_id, data})
+  defp write_to_l3(l3_name, machine_id, data) do
+    :ets.insert(l3_name, {machine_id, data})
     :ok
   end
 
-  defp delete_from_l2(machine_id) do
-    :ets.delete(:pg_cache_l2_sim, machine_id)
+  defp delete_from_l2(l2_name, machine_id) do
+    :ets.delete(l2_name, machine_id)
   end
 
-  defp delete_from_l3(machine_id) do
-    :ets.delete(:pg_cache_l3_sim, machine_id)
+  defp delete_from_l3(l3_name, machine_id) do
+    :ets.delete(l3_name, machine_id)
   end
 
   defp adaptive_ttl(access_count_per_minute) do

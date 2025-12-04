@@ -60,7 +60,7 @@ defmodule Orchestrator.Testing.Holodeck do
       failed_operations: 0
     }
 
-    Logger.info("Holodeck Load Generator started")
+    Logger.debug("Holodeck Load Generator started")
 
     :telemetry.execute(
       [:orchestrator, :holodeck, :started],
@@ -73,26 +73,30 @@ defmodule Orchestrator.Testing.Holodeck do
 
   @impl true
   def handle_call({:spawn_machines, count}, _from, state) do
-    Logger.info("Holodeck: Spawning #{count} machines...")
+    Logger.debug("Holodeck: Spawning #{count} machines...")
 
     start_time = System.monotonic_time(:microsecond)
 
     machine_ids =
-      1..count
-      |> Task.async_stream(
-        fn i ->
-          spawn_single_machine("holodeck_machine_#{i}_#{:rand.uniform(1_000_000)}")
-        end,
-        max_concurrency: 1000,
-        timeout: 30_000
-      )
-      |> Enum.map(fn {:ok, machine_id} -> machine_id end)
+      if count > 0 do
+        1..count
+        |> Task.async_stream(
+          fn i ->
+            spawn_single_machine("holodeck_machine_#{i}_#{:rand.uniform(1_000_000)}")
+          end,
+          max_concurrency: 1000,
+          timeout: 30_000
+        )
+        |> Enum.map(fn {:ok, machine_id} -> machine_id end)
+      else
+        []
+      end
 
     end_time = System.monotonic_time(:microsecond)
-    duration_sec = (end_time - start_time) / 1_000_000
-    throughput = count / duration_sec
+    duration_sec = if count > 0, do: (end_time - start_time) / 1_000_000, else: 0.0
+    throughput = if count > 0 and duration_sec > 0, do: count / duration_sec, else: 0.0
 
-    Logger.info(
+    Logger.debug(
       "Holodeck: Spawned #{count} machines in #{Float.round(duration_sec, 2)}s (#{Float.round(throughput, 1)} machines/sec)"
     )
 
@@ -116,13 +120,21 @@ defmodule Orchestrator.Testing.Holodeck do
 
     start_time = System.monotonic_time(:microsecond)
 
-    for _ <- 1..iterations do
-      operation.()
+    if iterations > 0 do
+      for _ <- 1..iterations do
+        operation.()
+      end
     end
 
     end_time = System.monotonic_time(:microsecond)
     duration_sec = (end_time - start_time) / 1_000_000
-    throughput = iterations / duration_sec
+
+    throughput =
+      if duration_sec > 0 do
+        iterations / duration_sec
+      else
+        0.0
+      end
 
     {:reply, {:ok, throughput}, state}
   end
@@ -158,9 +170,27 @@ defmodule Orchestrator.Testing.Holodeck do
 
     process_count = :erlang.system_info(:process_count)
 
+    case :erlang.statistics(:scheduler_wall_time) do
+      {:scheduler_wall_time_all, samples} -> samples
+      samples when is_list(samples) -> samples
+      _ -> []
+    end
+    |> Enum.map(fn
+      {_type, _id, active, total} -> active / max(total, 1)
+      {_id, util} -> util
+    end)
+    |> Enum.sum()
+
     scheduler_usage =
-      :scheduler.sample_all()
-      |> Enum.map(fn {_id, util} -> util end)
+      case :erlang.statistics(:scheduler_wall_time) do
+        {:scheduler_wall_time_all, samples} -> samples
+        samples when is_list(samples) -> samples
+        _ -> []
+      end
+      |> Enum.map(fn
+        {_type, _id, active, total} -> active / max(total, 1)
+        {_id, util} -> util
+      end)
       |> Enum.sum()
       |> Kernel./(System.schedulers_online())
 
@@ -188,7 +218,7 @@ defmodule Orchestrator.Testing.Holodeck do
 
   @impl true
   def handle_call(:stop_all_machines, _from, state) do
-    Logger.info("Holodeck: Stopping all machines...")
+    Logger.debug("Holodeck: Stopping all machines...")
 
     machines = :ets.tab2list(:holodeck_machines)
 
@@ -200,7 +230,7 @@ defmodule Orchestrator.Testing.Holodeck do
       :ets.delete(:holodeck_machines, machine_id)
     end)
 
-    Logger.info("Holodeck: Stopped #{length(machines)} machines")
+    Logger.debug("Holodeck: Stopped #{length(machines)} machines")
 
     {:reply, :ok, state}
   end
@@ -219,7 +249,7 @@ defmodule Orchestrator.Testing.Holodeck do
     target = Keyword.get(opts, :target, 5000)
     interval = Keyword.get(opts, :interval, @default_ramp_interval_ms)
 
-    Logger.info("Holodeck: Running RAMP-UP scenario (target=#{target}, interval=#{interval}ms)")
+    Logger.debug("Holodeck: Running RAMP-UP scenario (target=#{target}, interval=#{interval}ms)")
 
     Task.start(fn ->
       run_ramp_up_scenario(target, interval)
@@ -232,7 +262,7 @@ defmodule Orchestrator.Testing.Holodeck do
   def handle_cast({:run_scenario, :spike, opts}, state) do
     count = Keyword.get(opts, :count, 5000)
 
-    Logger.info("Holodeck: Running SPIKE scenario (count=#{count})")
+    Logger.debug("Holodeck: Running SPIKE scenario (count=#{count})")
 
     Task.start(fn ->
       spawn_machines(count)
@@ -246,7 +276,7 @@ defmodule Orchestrator.Testing.Holodeck do
     count = Keyword.get(opts, :count, 5000)
     duration = Keyword.get(opts, :duration, @default_sustained_duration_ms)
 
-    Logger.info("Holodeck: Running SUSTAINED scenario (count=#{count}, duration=#{duration}ms)")
+    Logger.debug("Holodeck: Running SUSTAINED scenario (count=#{count}, duration=#{duration}ms)")
 
     Task.start(fn ->
       run_sustained_scenario(count, duration)
@@ -260,7 +290,7 @@ defmodule Orchestrator.Testing.Holodeck do
     count = Keyword.get(opts, :count, 1000)
     failure_rate = Keyword.get(opts, :failure_rate, 10)
 
-    Logger.info(
+    Logger.debug(
       "Holodeck: Running CHAOS scenario (count=#{count}, failure_rate=#{failure_rate}%)"
     )
 
@@ -298,13 +328,13 @@ defmodule Orchestrator.Testing.Holodeck do
     ramp_up_step(current, target, interval)
   end
 
-  defp ramp_up_step(current, target, _interval) when current >= target do
-    Logger.info("Holodeck: Ramp-up complete (reached #{current} machines)")
+  defp ramp_up_step(current, target, _interval) when current > target do
+    Logger.debug("Holodeck: Ramp-up complete (reached #{current} machines)")
     :ok
   end
 
   defp ramp_up_step(current, target, interval) do
-    Logger.info("Holodeck: Ramp-up step: spawning #{current} machines...")
+    Logger.debug("Holodeck: Ramp-up step: spawning #{current} machines...")
 
     spawn_machines(current)
 
@@ -316,7 +346,7 @@ defmodule Orchestrator.Testing.Holodeck do
   defp run_sustained_scenario(count, duration) do
     {:ok, _machines} = spawn_machines(count)
 
-    Logger.info("Holodeck: Sustained load running for #{div(duration, 1000)}s...")
+    Logger.debug("Holodeck: Sustained load running for #{div(duration, 1000)}s...")
 
     end_time = System.monotonic_time(:millisecond) + duration
 
@@ -334,7 +364,7 @@ defmodule Orchestrator.Testing.Holodeck do
       Process.sleep(1000)
       sustained_loop(end_time)
     else
-      Logger.info("Holodeck: Sustained load complete")
+      Logger.debug("Holodeck: Sustained load complete")
       :ok
     end
   end
@@ -356,7 +386,7 @@ defmodule Orchestrator.Testing.Holodeck do
       end
     end)
 
-    Logger.info("Holodeck: Chaos scenario complete (killed #{length(machines_to_kill)} machines)")
+    Logger.debug("Holodeck: Chaos scenario complete (killed #{length(machines_to_kill)} machines)")
   end
 
   defp percentile(sorted_list, p) do

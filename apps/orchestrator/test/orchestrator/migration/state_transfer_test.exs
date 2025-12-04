@@ -135,6 +135,7 @@ defmodule Orchestrator.Migration.StateTransferTest do
 
   describe "telemetry events" do
     setup do
+
       events = [
         [:orchestrator, :state_transfer, :snapshot_created],
         [:orchestrator, :state_transfer, :wal_shipped],
@@ -195,7 +196,7 @@ defmodule Orchestrator.Migration.StateTransferTest do
       StateTransfer.transfer_final_state("machine_telemetry_flush_1", 1_048_576)
 
       assert_receive {:telemetry_event, [:orchestrator, :state_transfer, :final_flush],
-                      measurements, metadata},
+                      measurements, %{machine_id: "machine_telemetry_flush_1"} = metadata},
                      1000
 
       assert is_integer(measurements.downtime_ms)
@@ -233,11 +234,11 @@ defmodule Orchestrator.Migration.StateTransferTest do
     end
 
     test "snapshot + compression + verification workflow" do
-      {:ok, snapshot_file, _lsn} = StateTransfer.create_snapshot("machine_compress_verify_1")
+      {:ok, _snapshot_file, _lsn} = StateTransfer.create_snapshot("machine_compress_verify_1")
 
       snapshot_data = :crypto.strong_rand_bytes(1_048_576)
 
-      {:ok, compressed, ratio} = StateTransfer.compress_data(snapshot_data)
+      {:ok, _compressed, ratio} = StateTransfer.compress_data(snapshot_data)
       assert ratio > 1.0
 
       decompressed = snapshot_data

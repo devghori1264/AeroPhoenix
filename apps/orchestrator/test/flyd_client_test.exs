@@ -3,12 +3,16 @@ defmodule Orchestrator.FlydClientTest do
   import ExUnit.CaptureLog
 
   alias Orchestrator.FlydClient
+  alias Orchestrator.Migration.CircuitBreaker
 
   @moduletag :integration
   @flyd_base_url "http://localhost:8080"
 
   setup do
-    start_supervised!({Finch, name: Orchestrator.Finch})
+    CircuitBreaker.reset(:flyd_lifecycle)
+    CircuitBreaker.reset(:flyd_migration)
+    CircuitBreaker.reset(:flyd_read)
+    CircuitBreaker.reset(:flyd_write)
 
     wait_for_flyd_ready()
 
@@ -162,14 +166,16 @@ defmodule Orchestrator.FlydClientTest do
                "PHASE_SYNCING_DATA",
                "PHASE_REDIRECTING_TRAFFIC",
                "PHASE_CLEANUP",
-               "PHASE_COMPLETE"
+               "PHASE_COMPLETE",
+               "PHASE_FAILED"
              ]
 
       assert status["state"] in [
                "STATE_PENDING",
-               "STATE_RUNNING",
+               "STATE_IN_PROGRESS",
                "STATE_COMPLETED",
-               "STATE_FAILED"
+               "STATE_FAILED",
+               "STATE_ROLLED_BACK"
              ]
 
       assert is_integer(status["progress_percent"])
@@ -207,7 +213,7 @@ defmodule Orchestrator.FlydClientTest do
 
     test "streams migration progress updates", %{migration_id: migration_id} do
       test_pid = self()
-      progress_updates = []
+      _progress_updates = []
 
       callback = fn update ->
         send(test_pid, {:progress_update, update})
@@ -259,7 +265,7 @@ defmodule Orchestrator.FlydClientTest do
 
           Process.sleep(1000)
 
-          if Process.alive?(pid), do: Process.exit(pid, :kill)
+          if Process.alive?(pid), do: Process.exit(pid, :normal)
           Process.sleep(100)
         end)
 

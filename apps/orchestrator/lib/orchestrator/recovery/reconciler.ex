@@ -17,27 +17,39 @@ defmodule Orchestrator.Recovery.Reconciler do
   ]
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  def force_reconciliation do
-    GenServer.call(__MODULE__, :force_reconciliation, :infinity)
+  def force_reconciliation(server \\ __MODULE__) do
+    GenServer.call(server, :force_reconciliation, :infinity)
   end
 
-  def stats do
-    GenServer.call(__MODULE__, :stats)
+  def stats(server \\ __MODULE__) do
+    GenServer.call(server, :stats)
   end
 
-  def retry_repair(machine_id) do
-    GenServer.call(__MODULE__, {:retry_repair, machine_id})
+  def get_stats(server \\ __MODULE__) do
+    stats(server)
   end
 
-  def pause do
-    GenServer.call(__MODULE__, :pause)
+  def retry_repair(server \\ __MODULE__, machine_id) do
+    {server, machine_id} =
+      if is_binary(server) and machine_id == nil do
+        {__MODULE__, server}
+      else
+        {server, machine_id}
+      end
+
+    GenServer.call(server, {:retry_repair, machine_id})
   end
 
-  def resume do
-    GenServer.call(__MODULE__, :resume)
+  def pause(server \\ __MODULE__) do
+    GenServer.call(server, :pause)
+  end
+
+  def resume(server \\ __MODULE__) do
+    GenServer.call(server, :resume)
   end
 
   @impl true
@@ -68,7 +80,7 @@ defmodule Orchestrator.Recovery.Reconciler do
       }
     }
 
-    Logger.info("Reconciler started",
+    Logger.debug("Reconciler started",
       interval_ms: interval_ms,
       auto_repair: enable_auto_repair
     )
@@ -82,7 +94,7 @@ defmodule Orchestrator.Recovery.Reconciler do
 
   @impl true
   def handle_call(:force_reconciliation, _from, state) do
-    Logger.info("Force reconciliation triggered")
+    Logger.debug("Force reconciliation triggered")
 
     {result, new_state} = execute_reconciliation_cycle(state)
 
@@ -101,7 +113,7 @@ defmodule Orchestrator.Recovery.Reconciler do
 
   @impl true
   def handle_call({:retry_repair, machine_id}, _from, state) do
-    Logger.info("Manual retry requested", machine_id: machine_id)
+    Logger.debug("Manual retry requested", machine_id: machine_id)
 
     case DriftDetector.check_machine(machine_id) do
       {:ok, :healthy} ->
@@ -118,14 +130,14 @@ defmodule Orchestrator.Recovery.Reconciler do
 
   @impl true
   def handle_call(:pause, _from, state) do
-    Logger.info("Reconciler paused")
+    Logger.debug("Reconciler paused")
 
     new_state =
       if state.timer_ref do
         Process.cancel_timer(state.timer_ref)
-        put_in(state.config.paused, true)
+        %{state | config: %{state.config | paused: true}}
       else
-        put_in(state.config.paused, true)
+        %{state | config: %{state.config | paused: true}}
       end
 
     {:reply, :ok, %{new_state | timer_ref: nil}}
@@ -133,11 +145,10 @@ defmodule Orchestrator.Recovery.Reconciler do
 
   @impl true
   def handle_call(:resume, _from, state) do
-    Logger.info("Reconciler resumed")
+    Logger.debug("Reconciler resumed")
 
     new_state =
-      state
-      |> put_in([:config, :paused], false)
+      %{state | config: %{state.config | paused: false}}
       |> schedule_next_cycle()
 
     {:reply, :ok, new_state}
@@ -155,35 +166,58 @@ defmodule Orchestrator.Recovery.Reconciler do
   end
 
   @impl true
+  def handle_info({:repair_complete, machine_id}, state) do
+    Logger.debug("Repair completed for machine", machine_id: machine_id)
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({:repair_complete, machine_id, result}, state) do
     Logger.debug("Repair completed async", machine_id: machine_id, result: result)
 
     new_state =
       case result do
         :ok ->
-          update_in(state.stats.total_repairs_succeeded, &(&1 + 1))
+          %{
+            state
+            | stats: %{
+                state.stats
+                | total_repairs_succeeded: state.stats.total_repairs_succeeded + 1
+              }
+          }
 
         {:error, _reason} ->
-          state
-          |> update_in([:stats, :total_repairs_failed], &(&1 + 1))
-          |> update_in([:stats, :failed_machines], &MapSet.put(&1, machine_id))
+          new_stats = %{
+            state.stats
+            | total_repairs_failed: state.stats.total_repairs_failed + 1,
+              failed_machines: MapSet.put(state.stats.failed_machines, machine_id)
+          }
+
+          %{state | stats: new_stats}
       end
 
     {:noreply, new_state}
   end
 
+  @impl true
+  def handle_info(_msg, state) do
+    {:noreply, state}
+  end
+
   defp execute_reconciliation_cycle(state) do
     start_time = System.monotonic_time(:millisecond)
 
-    Logger.info("Starting reconciliation cycle",
+    Logger.debug("Starting reconciliation cycle",
       cycle: state.stats.total_cycles + 1
     )
+
+    Orchestrator.ResourceManager.scan_for_leaks()
 
     case DriftDetector.detect_drift() do
       {:ok, drift_report} ->
         anomaly_count = length(drift_report.anomalies)
 
-        Logger.info("Drift detection complete",
+        Logger.debug("Drift detection complete",
           anomalies_found: anomaly_count,
           summary: drift_report.summary
         )
@@ -229,7 +263,7 @@ defmodule Orchestrator.Recovery.Reconciler do
           %{node: node()}
         )
 
-        Logger.info("Reconciliation cycle complete",
+        Logger.debug("Reconciliation cycle complete",
           duration_ms: duration_ms,
           anomalies_found: anomaly_count,
           repairs_attempted: repairs_attempted,
@@ -278,7 +312,7 @@ defmodule Orchestrator.Recovery.Reconciler do
     anomalies_to_repair = Enum.take(repairable_anomalies, @max_concurrent_repairs)
 
     if length(anomalies_to_repair) < length(sorted_anomalies) do
-      Logger.warning("Repair queue limited by concurrency",
+      Logger.info("Repair queue limited by concurrency",
         total_anomalies: length(sorted_anomalies),
         repairing_now: length(anomalies_to_repair),
         queued: length(sorted_anomalies) - length(anomalies_to_repair)
@@ -326,7 +360,7 @@ defmodule Orchestrator.Recovery.Reconciler do
           }
         )
 
-        Logger.info("Repair succeeded",
+        Logger.debug("Repair succeeded",
           machine_id: anomaly.machine_id,
           anomaly_type: anomaly.type,
           outcome: outcome,
@@ -344,7 +378,7 @@ defmodule Orchestrator.Recovery.Reconciler do
           }
         )
 
-        Logger.error("Repair failed after retries",
+        Logger.info("Repair failed after retries",
           machine_id: anomaly.machine_id,
           anomaly_type: anomaly.type,
           reason: inspect(reason),

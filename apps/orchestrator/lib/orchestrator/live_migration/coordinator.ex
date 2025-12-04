@@ -2,8 +2,10 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   use GenServer
   require Logger
   alias Orchestrator.LiveMigration.{Checkpointer, StateTransfer, Cutover}
-  alias Orchestrator.{FlydClient, Manager}
+  alias Orchestrator.Manager
   alias Orchestrator.Reconciliation.Engine, as: ReconciliationEngine
+
+  @flyd_client Application.compile_env(:orchestrator, :flyd_client, Orchestrator.FlydClient)
   @type migration_id :: String.t()
   @type machine_id :: String.t()
   @type region :: String.t()
@@ -44,10 +46,25 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   @rollback_timeout_ms 30_000
   @spec start_migration(machine_id(), region(), keyword()) ::
           {:ok, migration_id()} | {:error, term()}
-  def start_migration(machine_id, target_region, opts \\ []) do
-    GenServer.start_link(__MODULE__, {machine_id, target_region, opts},
+  def start_migration(machine_id, target_region, opts \\ [])
+
+  def start_migration(machine_id, target_region, opts) when is_list(opts) do
+    migration_id = generate_migration_id()
+    case GenServer.start_link(__MODULE__, {migration_id, machine_id, target_region, opts},
       name: via_tuple(machine_id)
-    )
+    ) do
+      {:ok, _pid} -> {:ok, migration_id}
+      error -> error
+    end
+  end
+
+  def start_migration(machine_id, _source_region, target_region) when is_binary(target_region) do
+    start_migration(machine_id, target_region, [])
+  end
+
+  def start_migration(machine_id, _source_region, target_region, opts) do
+    opts_list = if is_map(opts), do: Enum.to_list(opts), else: opts
+    start_migration(machine_id, target_region, opts_list)
   end
 
   @spec get_status(migration_id()) :: {:ok, map()} | {:error, :not_found}
@@ -83,8 +100,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   end
 
   @impl true
-  def init({machine_id, target_region, opts}) do
-    migration_id = generate_migration_id()
+  def init({migration_id, machine_id, target_region, opts}) do
 
     Logger.info("LiveMigration coordinator starting",
       migration_id: migration_id,
@@ -92,45 +108,52 @@ defmodule Orchestrator.LiveMigration.Coordinator do
       target_region: target_region
     )
 
-    {:ok, machine} = Manager.get_machine(machine_id)
-    source_region = machine.region
+    with %{region: source_region} <- Manager.get_machine(machine_id) do
+      config = %{
+        strategy: Keyword.get(opts, :strategy, :hybrid),
+        max_iterations: Keyword.get(opts, :max_iterations, @max_iterations),
+        freeze_threshold_ms: Keyword.get(opts, :freeze_threshold_ms, @freeze_threshold_ms),
+        parallelism: Keyword.get(opts, :parallelism, @transfer_parallelism),
+        verify_checksums: Keyword.get(opts, :verify_checksums, true),
+        checksum_algorithm: Keyword.get(opts, :checksum_algorithm, @checksum_algorithm),
+        auto_rollback: Keyword.get(opts, :auto_rollback, true),
+        preserve_ip: Keyword.get(opts, :preserve_ip, false),
+        metadata: Keyword.get(opts, :metadata, %{}),
+        sandbox_owner: Keyword.get(opts, :sandbox_owner),
+        dirty_page_threshold: Keyword.get(opts, :dirty_page_threshold, @dirty_page_threshold),
+        delay_ms: Keyword.get(opts, :delay_ms, 0)
+      }
 
-    config = %{
-      strategy: Keyword.get(opts, :strategy, :hybrid),
-      max_iterations: Keyword.get(opts, :max_iterations, @max_iterations),
-      freeze_threshold_ms: Keyword.get(opts, :freeze_threshold_ms, @freeze_threshold_ms),
-      parallelism: Keyword.get(opts, :parallelism, @transfer_parallelism),
-      verify_checksums: Keyword.get(opts, :verify_checksums, true),
-      checksum_algorithm: Keyword.get(opts, :checksum_algorithm, @checksum_algorithm),
-      auto_rollback: Keyword.get(opts, :auto_rollback, true),
-      preserve_ip: Keyword.get(opts, :preserve_ip, false),
-      metadata: Keyword.get(opts, :metadata, %{})
-    }
+      state = %{
+        migration_id: migration_id,
+        machine_id: machine_id,
+        source_region: source_region,
+        target_region: target_region,
+        phase: :pre_flight,
+        strategy: config.strategy,
+        checkpoint_id: nil,
+        bytes_transferred: 0,
+        total_bytes: 0,
+        iterations: 0,
+        started_at: DateTime.utc_now(),
+        phase_started_at: DateTime.utc_now(),
+        downtime_ms: 0,
+        freeze_time_ms: 0,
+        errors: [],
+        config: config,
+        paused: false,
+        cancelled: false
+      }
 
-    state = %{
-      migration_id: migration_id,
-      machine_id: machine_id,
-      source_region: source_region,
-      target_region: target_region,
-      phase: :pre_flight,
-      strategy: config.strategy,
-      checkpoint_id: nil,
-      bytes_transferred: 0,
-      total_bytes: 0,
-      iterations: 0,
-      started_at: DateTime.utc_now(),
-      phase_started_at: DateTime.utc_now(),
-      downtime_ms: 0,
-      freeze_time_ms: 0,
-      errors: [],
-      config: config,
-      paused: false,
-      cancelled: false
-    }
+      {:ok, _} = Registry.register(Orchestrator.LiveMigrationRegistry, migration_id, nil)
 
-    :ets.insert(:live_migrations, {migration_id, machine_id, self()})
-    send(self(), :execute_migration)
-    {:ok, state}
+      :ets.insert(:live_migrations, {migration_id, machine_id, self()})
+      send(self(), :execute_migration)
+      {:ok, state}
+    else
+      nil ->
+        {:stop, :machine_not_found}
+    end
   end
 
   @impl true
@@ -335,6 +358,10 @@ defmodule Orchestrator.LiveMigration.Coordinator do
       migration_id: state.migration_id
     )
 
+    if state.config.delay_ms > 0 do
+      Process.sleep(state.config.delay_ms)
+    end
+
     phase_start = System.monotonic_time(:millisecond)
 
     case StateTransfer.transfer_incremental(
@@ -342,38 +369,27 @@ defmodule Orchestrator.LiveMigration.Coordinator do
            state.checkpoint_id,
            state.source_region,
            state.target_region,
-           %{
-             parallelism: state.config.parallelism,
-             verify_checksums: state.config.verify_checksums,
-             compression: true
-           }
+           state.config
          ) do
-      {:ok, transfer_result} ->
+      {:ok, result} ->
         duration = System.monotonic_time(:millisecond) - phase_start
-        new_bytes = state.bytes_transferred + transfer_result.bytes_transferred
+        new_bytes = state.bytes_transferred + result.bytes_transferred
         new_iterations = state.iterations + 1
-        dirty_ratio = transfer_result.dirty_pages / max(transfer_result.total_pages, 1)
-
-        Logger.info("Incremental sync completed",
-          migration_id: state.migration_id,
-          iteration: new_iterations,
-          bytes_transferred: transfer_result.bytes_transferred,
-          dirty_ratio: Float.round(dirty_ratio, 4),
-          duration_ms: duration
-        )
+        dirty_ratio = result.dirty_pages / result.total_pages
 
         :telemetry.execute(
-          [:orchestrator, :live_migration, :incremental_sync, :completed],
+          [:orchestrator, :live_migration, :incremental_sync],
           %{
             duration_ms: duration,
-            bytes_transferred: transfer_result.bytes_transferred,
+            bytes_transferred: result.bytes_transferred,
+            dirty_pages: result.dirty_pages,
             dirty_ratio: dirty_ratio
           },
           %{migration_id: state.migration_id, iteration: new_iterations}
         )
 
         should_finalize =
-          dirty_ratio < @dirty_page_threshold or
+          dirty_ratio < state.config.dirty_page_threshold or
             new_iterations >= state.config.max_iterations
 
         next_phase = if should_finalize, do: :final_sync, else: :incremental_sync
@@ -408,66 +424,53 @@ defmodule Orchestrator.LiveMigration.Coordinator do
     Logger.info("Phase: Final sync (freeze source)", migration_id: state.migration_id)
     freeze_start = System.monotonic_time(:millisecond)
 
-    case FlydClient.pause_machine(state.source_region, state.machine_id) do
-      :ok ->
-        case StateTransfer.transfer_final(
-               state.machine_id,
-               state.checkpoint_id,
-               state.source_region,
-               state.target_region,
-               %{verify_checksums: state.config.verify_checksums}
-             ) do
-          {:ok, transfer_result} ->
-            freeze_time = System.monotonic_time(:millisecond) - freeze_start
+    :ok = @flyd_client.pause_machine(state.source_region, state.machine_id)
 
-            Logger.info("Final sync completed",
-              migration_id: state.migration_id,
-              freeze_time_ms: freeze_time,
-              bytes_transferred: transfer_result.bytes_transferred
-            )
+    case StateTransfer.transfer_final(
+           state.machine_id,
+           state.checkpoint_id,
+           state.source_region,
+           state.target_region,
+           %{verify_checksums: state.config.verify_checksums}
+         ) do
+      {:ok, transfer_result} ->
+        freeze_time = System.monotonic_time(:millisecond) - freeze_start
 
-            if freeze_time > state.config.freeze_threshold_ms do
-              Logger.warning("Freeze time exceeded threshold",
-                migration_id: state.migration_id,
-                freeze_time_ms: freeze_time,
-                threshold_ms: state.config.freeze_threshold_ms
-              )
-            end
+        Logger.info("Final sync completed",
+          migration_id: state.migration_id,
+          freeze_time_ms: freeze_time,
+          bytes_transferred: transfer_result.bytes_transferred
+        )
 
-            :telemetry.execute(
-              [:orchestrator, :live_migration, :final_sync, :completed],
-              %{
-                freeze_time_ms: freeze_time,
-                bytes_transferred: transfer_result.bytes_transferred
-              },
-              %{migration_id: state.migration_id}
-            )
-
-            %{
-              state
-              | phase: :cutover,
-                phase_started_at: DateTime.utc_now(),
-                freeze_time_ms: freeze_time,
-                bytes_transferred: state.bytes_transferred + transfer_result.bytes_transferred
-            }
-
-          {:error, reason} ->
-            FlydClient.resume_machine(state.source_region, state.machine_id)
-
-            Logger.error("Final sync failed",
-              migration_id: state.migration_id,
-              reason: reason
-            )
-
-            %{
-              state
-              | phase: :failed,
-                errors: [%{phase: :final_sync, reason: reason} | state.errors]
-            }
+        if freeze_time > state.config.freeze_threshold_ms do
+          Logger.warning("Freeze time exceeded threshold",
+            migration_id: state.migration_id,
+            freeze_time_ms: freeze_time,
+            threshold_ms: state.config.freeze_threshold_ms
+          )
         end
 
+        :telemetry.execute(
+          [:orchestrator, :live_migration, :final_sync, :completed],
+          %{
+            freeze_time_ms: freeze_time,
+            bytes_transferred: transfer_result.bytes_transferred
+          },
+          %{migration_id: state.migration_id}
+        )
+
+        %{
+          state
+          | phase: :cutover,
+            phase_started_at: DateTime.utc_now(),
+            freeze_time_ms: freeze_time,
+            bytes_transferred: state.bytes_transferred + transfer_result.bytes_transferred
+        }
+
       {:error, reason} ->
-        Logger.error("Failed to pause source machine",
+        @flyd_client.resume_machine(state.source_region, state.machine_id)
+
+        Logger.error("Final sync failed",
           migration_id: state.migration_id,
           reason: reason
         )
@@ -475,9 +478,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
         %{
           state
           | phase: :failed,
-            errors: [
-              %{phase: :final_sync, reason: "pause_failed: #{inspect(reason)}"} | state.errors
-            ]
+            errors: [%{phase: :final_sync, reason: reason} | state.errors]
         }
     end
   end
@@ -538,15 +539,16 @@ defmodule Orchestrator.LiveMigration.Coordinator do
            level: :deep,
            verify_checksums: true,
            source_region: state.source_region,
-           target_region: state.target_region
+           target_region: state.target_region,
+           sandbox_owner: state.config[:sandbox_owner]
          }) do
       {:ok, reconciliation_result} ->
         duration = System.monotonic_time(:millisecond) - phase_start
 
-        if reconciliation_result.has_drift do
-          Logger.warning("Post-migration drift detected",
+        if reconciliation_result.drift_detected do
+          Logger.warning("Drift detected during verification",
             migration_id: state.migration_id,
-            severity: reconciliation_result.severity,
+            severity: reconciliation_result.drift_severity,
             drift_count: length(reconciliation_result.inconsistencies)
           )
 
@@ -603,53 +605,44 @@ defmodule Orchestrator.LiveMigration.Coordinator do
     Logger.info("Phase: Cleanup", migration_id: state.migration_id)
     phase_start = System.monotonic_time(:millisecond)
 
-    case FlydClient.destroy_machine(state.source_region, state.machine_id) do
-      :ok ->
-        Checkpointer.delete_checkpoint(state.checkpoint_id)
-        duration = System.monotonic_time(:millisecond) - phase_start
-        total_duration = DateTime.diff(DateTime.utc_now(), state.started_at, :millisecond)
+    {:ok, _} = @flyd_client.destroy_machine(state.source_region, state.machine_id)
 
-        :telemetry.execute(
-          [:orchestrator, :live_migration, :cleanup, :completed],
-          %{duration_ms: duration},
-          %{migration_id: state.migration_id}
-        )
+    Checkpointer.delete_checkpoint(state.checkpoint_id)
+    duration = System.monotonic_time(:millisecond) - phase_start
+    total_duration = DateTime.diff(DateTime.utc_now(), state.started_at, :millisecond)
 
-        Logger.info("Live migration completed successfully",
-          migration_id: state.migration_id,
-          total_duration_ms: total_duration,
-          downtime_ms: state.downtime_ms,
-          freeze_time_ms: state.freeze_time_ms,
-          bytes_transferred: state.bytes_transferred,
-          iterations: state.iterations
-        )
+    :telemetry.execute(
+      [:orchestrator, :live_migration, :cleanup, :completed],
+      %{duration_ms: duration},
+      %{migration_id: state.migration_id}
+    )
 
-        :telemetry.execute(
-          [:orchestrator, :live_migration, :completed],
-          %{
-            total_duration_ms: total_duration,
-            downtime_ms: state.downtime_ms,
-            freeze_time_ms: state.freeze_time_ms,
-            bytes_transferred: state.bytes_transferred,
-            iterations: state.iterations
-          },
-          %{migration_id: state.migration_id}
-        )
+    Logger.info("Live migration completed successfully",
+      migration_id: state.migration_id,
+      total_duration_ms: total_duration,
+      downtime_ms: state.downtime_ms,
+      freeze_time_ms: state.freeze_time_ms,
+      bytes_transferred: state.bytes_transferred,
+      iterations: state.iterations
+    )
 
-        %{state | phase: :completed}
+    :telemetry.execute(
+      [:orchestrator, :live_migration, :completed],
+      %{
+        total_duration_ms: total_duration,
+        downtime_ms: state.downtime_ms,
+        freeze_time_ms: state.freeze_time_ms,
+        bytes_transferred: state.bytes_transferred,
+        iterations: state.iterations
+      },
+      %{migration_id: state.migration_id}
+    )
 
-      {:error, reason} ->
-        Logger.warning("Cleanup failed (non-critical)",
-          migration_id: state.migration_id,
-          reason: reason
-        )
-
-        %{state | phase: :completed}
-    end
+    %{state | phase: :completed}
   end
 
   defp validate_source_availability(state) do
-    case FlydClient.get_machine_health(state.source_region, state.machine_id) do
+    case @flyd_client.get_machine_health(state.source_region, state.machine_id) do
       {:ok, health} when health.status == "healthy" ->
         {:ok, :source_available}
 
@@ -662,7 +655,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   end
 
   defp validate_target_capacity(state) do
-    case FlydClient.get_region_capacity(state.target_region) do
+    case @flyd_client.get_region_capacity(state.target_region) do
       {:ok, capacity} when capacity.available_slots > 0 ->
         {:ok, :target_has_capacity}
 
@@ -675,7 +668,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   end
 
   defp validate_network_connectivity(state) do
-    case FlydClient.ping_region(state.source_region, state.target_region) do
+    case @flyd_client.ping_region(state.source_region, state.target_region) do
       {:ok, latency_ms} when latency_ms < 1000 ->
         {:ok, {:network_ok, latency_ms}}
 
@@ -696,7 +689,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   end
 
   defp estimate_migration_size(state) do
-    case FlydClient.get_machine_size(state.source_region, state.machine_id) do
+    case @flyd_client.get_machine_size(state.source_region, state.machine_id) do
       {:ok, size_bytes} ->
         {:ok, size_bytes}
 
@@ -713,8 +706,8 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   defp perform_rollback(state) do
     Logger.warning("Performing rollback", migration_id: state.migration_id)
     rollback_start = System.monotonic_time(:millisecond)
-    FlydClient.resume_machine(state.source_region, state.machine_id)
-    FlydClient.destroy_machine(state.target_region, state.machine_id)
+    @flyd_client.resume_machine(state.source_region, state.machine_id)
+    @flyd_client.destroy_machine(state.target_region, state.machine_id)
 
     if state.checkpoint_id do
       Checkpointer.delete_checkpoint(state.checkpoint_id)
@@ -754,6 +747,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
       migration_id: state.migration_id,
       machine_id: state.machine_id,
       phase: state.phase,
+      status: determine_status(state),
       strategy: state.strategy,
       progress_percent: progress_percent,
       bytes_transferred: state.bytes_transferred,
@@ -769,12 +763,18 @@ defmodule Orchestrator.LiveMigration.Coordinator do
 
   defp persist_migration_record(state) do
     Logger.debug("Persisting migration record", migration_id: state.migration_id)
+    record = build_status_response(state)
+    :ets.insert(:live_migrations, {state.migration_id, record})
     :ok
   end
 
   defp get_completed_migration_status(migration_id) do
     Logger.debug("Querying completed migration status", migration_id: migration_id)
-    {:error, :not_found}
+    case :ets.lookup(:live_migrations, migration_id) do
+      [{^migration_id, record}] when is_map(record) -> {:ok, record}
+      [{^migration_id, _machine_id, _pid}] -> {:error, :in_progress}
+      [] -> {:error, :not_found}
+    end
   end
 
   defp find_migration_process(migration_id) do
@@ -787,6 +787,13 @@ defmodule Orchestrator.LiveMigration.Coordinator do
   defp generate_migration_id do
     "lm_" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
   end
+
+  defp determine_status(%{cancelled: true}), do: :cancelled
+  defp determine_status(%{phase: :completed}), do: :success
+  defp determine_status(%{phase: :failed}), do: :failed
+  defp determine_status(%{phase: :rolled_back}), do: :failed
+  defp determine_status(%{paused: true}), do: :paused
+  defp determine_status(_), do: :in_progress
 
   defp via_tuple(machine_id) do
     {:via, Registry, {Orchestrator.LiveMigrationRegistry, machine_id}}

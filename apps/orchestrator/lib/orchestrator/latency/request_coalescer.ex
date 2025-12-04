@@ -48,7 +48,7 @@ defmodule Orchestrator.Latency.RequestCoalescer do
 
     receive do
       {:batch_result, ^waiter_ref, result} ->
-        {:ok, result}
+        result
     after
       timeout ->
         {:error, :timeout}
@@ -76,6 +76,7 @@ defmodule Orchestrator.Latency.RequestCoalescer do
       max_batch_bytes: Keyword.get(opts, :max_batch_bytes, @default_max_batch_bytes),
       flush_timer_ref: nil,
       executor_fn: executor_fn,
+      notify_pid: Keyword.get(opts, :notify_pid),
       metrics: initialize_metrics()
     }
 
@@ -155,6 +156,11 @@ defmodule Orchestrator.Latency.RequestCoalescer do
     {:noreply, new_state}
   end
 
+  @impl true
+  def handle_info(_msg, state) do
+    {:noreply, state}
+  end
+
   defp flush_batch(batch, state) do
     batch_size = map_size(batch.requests)
 
@@ -201,7 +207,7 @@ defmodule Orchestrator.Latency.RequestCoalescer do
       dedup_pct = if total_waiters > 0, do: dedup_savings / total_waiters * 100.0, else: 0.0
 
       Logger.debug("Batch flushed",
-        batch_count: length(batch),
+        batch_count: map_size(batch.requests),
         total_waiters: total_waiters,
         dedup_savings: dedup_savings,
         dedup_percentage: Float.round(dedup_pct, 2)
@@ -223,6 +229,10 @@ defmodule Orchestrator.Latency.RequestCoalescer do
         },
         %{operation_type: state.operation_type}
       )
+
+      if state.notify_pid do
+        send(state.notify_pid, {:batch_executed, unique_count, execution_time_ms})
+      end
 
       %{
         state
@@ -264,6 +274,7 @@ defmodule Orchestrator.Latency.RequestCoalescer do
       avg_batch_size: Float.round(avg_batch_size, 1),
       rpc_reduction_ratio: Float.round(rpc_reduction_ratio, 1),
       dedup_savings_pct: Float.round(dedup_savings_pct, 2),
+      total_deduped: total_deduped,
       pending_batch_size:
         if(state.pending_batch, do: map_size(state.pending_batch.requests), else: 0)
     }

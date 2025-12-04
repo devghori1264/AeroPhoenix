@@ -37,8 +37,12 @@ defmodule Orchestrator.Latency.GeoRouter do
     "jnb" => {-26.1393, 28.2460}
   }
   @spec haversine_distance(coordinates() | map(), coordinates() | map()) :: float()
-  def haversine_distance(%{lat: lat1, lon: lon1}, loc2), do: haversine_distance({lat1, lon1}, loc2)
-  def haversine_distance(loc1, %{lat: lat2, lon: lon2}), do: haversine_distance(loc1, {lat2, lon2})
+  def haversine_distance(%{lat: lat1, lon: lon1}, loc2),
+    do: haversine_distance({lat1, lon1}, loc2)
+
+  def haversine_distance(loc1, %{lat: lat2, lon: lon2}),
+    do: haversine_distance(loc1, {lat2, lon2})
+
   def haversine_distance({lat1, lon1}, {lat2, lon2}) do
     lat1_rad = degrees_to_radians(lat1)
     lon1_rad = degrees_to_radians(lon1)
@@ -64,6 +68,7 @@ defmodule Orchestrator.Latency.GeoRouter do
 
   @spec select_best_region(coordinates() | nil, keyword()) :: region_info() | nil
   def select_best_region(nil, _opts), do: nil
+
   def select_best_region(user_location, opts) do
     select_best_region([user_location: user_location] ++ opts)
   end
@@ -71,6 +76,7 @@ defmodule Orchestrator.Latency.GeoRouter do
   @spec select_best_region(keyword()) :: region_info() | nil
   def select_best_region(opts) do
     user_location = Keyword.fetch!(opts, :user_location)
+
     available_regions =
       Keyword.fetch!(opts, :available_regions)
       |> Enum.map(fn
@@ -118,7 +124,6 @@ defmodule Orchestrator.Latency.GeoRouter do
       max_distance = Enum.max_by(enriched_regions, & &1.distance_km).distance_km
       max_latency = Enum.max_by(enriched_regions, & &1.p95_latency_ms).p95_latency_ms
 
-      # Avoid division by zero
       max_distance = if max_distance == 0, do: 1.0, else: max_distance
       max_latency = if max_latency == 0, do: 1.0, else: max_latency
 

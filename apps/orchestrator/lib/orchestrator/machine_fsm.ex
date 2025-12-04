@@ -1,7 +1,8 @@
 defmodule Orchestrator.MachineFSM do
   use GenServer
   require Logger
-  alias Orchestrator.{Repo, Machine, FlydClient, MachineEvent}
+  alias Orchestrator.{Repo, Machines.Machine, MachineEvent}
+  @flyd_client Application.compile_env(:orchestrator, :flyd_client, Orchestrator.FlydClient)
 
   @type machine_status ::
           :created
@@ -145,14 +146,11 @@ defmodule Orchestrator.MachineFSM do
   @impl true
   def init(init) do
     id = to_string(init["id"] || init[:id] || UUID.uuid4())
-    machine = Repo.get_by(Machine, id: id)
-    initial_status = normalize_status((machine && machine.status) || "created")
     now = DateTime.utc_now()
-    region = (machine && machine.region) || init[:region] || init["region"]
 
     state = %{
       id: id,
-      status: initial_status,
+      status: init[:status] || init["status"],
       previous_status: nil,
       target_region: nil,
       retry_count: 0,
@@ -167,24 +165,92 @@ defmodule Orchestrator.MachineFSM do
       health_check_interval_ms: @health_check_interval_ms,
       last_health_check_at: nil,
       health_check_failures: 0,
-      region: region
+      region: init[:region] || init["region"],
+      name: init[:name] || init["name"],
+      machine_type: init[:machine_type] || init["machine_type"]
+    }
+
+    if owner = init[:sandbox_owner] do
+      Ecto.Adapters.SQL.Sandbox.allow(Orchestrator.Repo, owner, self())
+    end
+
+    {:ok, state, {:continue, :load_state}}
+  end
+
+  @impl true
+  def handle_continue(:load_state, state) do
+    m =
+      case Repo.get_by(Machine, id: state.id) do
+        nil ->
+          status_string =
+            case state.status do
+              s when is_atom(s) -> Atom.to_string(s)
+              s when is_binary(s) -> s
+              nil -> "created"
+            end
+
+          changeset =
+            %Machine{}
+            |> Machine.changeset(%{
+              id: state.id,
+              name: state.name || "machine-#{String.slice(state.id, 0..7)}",
+              region: state.region || "unknown",
+              status: status_string,
+              machine_type: state.machine_type || "shared-cpu-1x"
+            })
+            |> Ecto.Changeset.unique_constraint(:id, name: :machines_pkey)
+            |> Ecto.Changeset.unique_constraint(:name, name: :machines_name_index)
+
+          case Repo.insert(changeset) do
+            {:ok, machine} ->
+              machine
+
+            {:error, changeset} ->
+              if changeset.errors[:id] || changeset.errors[:name] do
+                Repo.get!(Machine, state.id)
+              else
+                raise "Failed to insert machine: #{inspect(changeset.errors)}"
+              end
+          end
+
+        machine ->
+          machine
+      end
+
+    final_status =
+      if state.status do
+        normalize_status(state.status)
+      else
+        normalize_status((m && m.status) || "created")
+      end
+
+    final_region = (m && m.region) || state.region
+    final_name = (m && m.name) || state.name
+    final_type = (m && m.machine_type) || state.machine_type
+
+    state = %{
+      state
+      | status: final_status,
+        region: final_region,
+        name: final_name,
+        machine_type: final_type
     }
 
     state =
-      if initial_status == :running do
+      if final_status == :running do
         schedule_health_check(state)
       else
         state
       end
 
-    Logger.info("MachineFSM[#{id}] initialized",
-      status: initial_status,
-      region: region,
+    Logger.info("MachineFSM[#{state.id}] initialized",
+      status: final_status,
+      region: final_region,
       version: state.state_version
     )
 
-    emit_telemetry(:fsm_initialized, state, %{initial_status: initial_status})
-    {:ok, state}
+    emit_telemetry(:fsm_initialized, state, %{initial_status: final_status})
+    {:noreply, state}
   end
 
   @impl true
@@ -197,10 +263,12 @@ defmodule Orchestrator.MachineFSM do
       target_region: state.target_region,
       state_version: state.state_version,
       retry_count: state.retry_count,
+      max_retries: state.max_retries,
       crash_count: state.crash_count,
       health_check_failures: state.health_check_failures,
       last_transition_at: state.last_transition_at,
       last_health_check_at: state.last_health_check_at,
+      health_check_interval_ms: state.health_check_interval_ms,
       metadata: state.metadata
     }
 
@@ -380,7 +448,7 @@ defmodule Orchestrator.MachineFSM do
       |> cancel_health_check_timer()
       |> transition_to(new_status, %{migration_result: result})
 
-    persist_db_update(new_state.id, %{
+    persist_db_update(new_state, %{
       status: Atom.to_string(new_status),
       region: state.target_region || state.region,
       last_seen_at: DateTime.utc_now()
@@ -447,14 +515,14 @@ defmodule Orchestrator.MachineFSM do
   defp do_start(state) do
     new_state = transition_to(state, :starting, %{action: :start})
 
-    with {:ok, resp} <- FlydClient.start_machine(state.id) do
+    with {:ok, resp} <- @flyd_client.start_machine(state.id) do
       final_state =
         new_state
         |> transition_to(:running, %{start_response: resp})
         |> schedule_health_check()
         |> reset_retry_count()
 
-      persist_db_update(final_state.id, %{
+      persist_db_update(final_state, %{
         status: "running",
         last_seen_at: DateTime.utc_now()
       })
@@ -480,14 +548,14 @@ defmodule Orchestrator.MachineFSM do
       |> cancel_health_check_timer()
       |> transition_to(:stopping, %{action: :stop})
 
-    case FlydClient.stop_machine(state.id) do
+    case @flyd_client.stop_machine(state.id) do
       {:ok, resp} ->
         final_state =
           new_state
           |> transition_to(:stopped, %{stop_response: resp})
           |> reset_retry_count()
 
-        persist_db_update(final_state.id, %{status: "stopped"})
+        persist_db_update(final_state, %{status: "stopped"})
         persist_event(final_state.id, "stopped", resp)
         broadcast_update(final_state.id)
         {:reply, {:ok, resp}, final_state}
@@ -508,10 +576,10 @@ defmodule Orchestrator.MachineFSM do
       |> cancel_health_check_timer()
       |> transition_to(:suspended, %{action: :suspend})
 
-    case FlydClient.stop_machine(state.id) do
+    case @flyd_client.stop_machine(state.id) do
       {:ok, resp} ->
         final_state = reset_retry_count(new_state)
-        persist_db_update(final_state.id, %{status: "suspended"})
+        persist_db_update(final_state, %{status: "suspended"})
         persist_event(final_state.id, "suspended", resp)
         broadcast_update(final_state.id)
         {:reply, {:ok, resp}, final_state}
@@ -536,7 +604,7 @@ defmodule Orchestrator.MachineFSM do
       |> cancel_health_check_timer()
       |> transition_to(:destroyed, %{action: :destroy})
 
-    persist_db_update(new_state.id, %{
+    persist_db_update(new_state, %{
       status: "destroyed",
       deleted_at: DateTime.utc_now()
     })
@@ -562,11 +630,11 @@ defmodule Orchestrator.MachineFSM do
       })
       |> Map.put(:target_region, target)
 
-    case FlydClient.migrate_machine(state.id, target, opts) do
+    case @flyd_client.migrate_machine(state.id, target, opts) do
       {:ok, resp} ->
         migration_id = resp["migration_id"]
 
-        persist_db_update(new_state.id, %{
+        persist_db_update(new_state, %{
           status: "migrating",
           region: target,
           last_seen_at: DateTime.utc_now()
@@ -576,7 +644,7 @@ defmodule Orchestrator.MachineFSM do
         broadcast_update(new_state.id)
 
         {:ok, _stream_pid} =
-          FlydClient.stream_migration_progress(migration_id, fn progress ->
+          @flyd_client.stream_migration_progress(migration_id, fn progress ->
             send(self(), {:migration_progress, progress})
           end)
 
@@ -587,30 +655,6 @@ defmodule Orchestrator.MachineFSM do
 
         schedule_state_timeout(new_state)
         {:reply, {:ok, resp}, reset_retry_count(new_state)}
-
-      {:error, {:invalid_strategy, strategy}} = error ->
-        Logger.error("MachineFSM[#{state.id}] invalid migration strategy",
-          strategy: strategy
-        )
-
-        persist_event(state.id, "migration_failed", %{
-          reason: "invalid_strategy",
-          strategy: strategy
-        })
-
-        {:reply, error, state}
-
-      {:error, {:bad_request, reason}} = error ->
-        Logger.error("MachineFSM[#{state.id}] bad migration request",
-          reason: reason
-        )
-
-        persist_event(state.id, "migration_failed", %{
-          reason: "bad_request",
-          details: reason
-        })
-
-        {:reply, error, state}
 
       {:error, reason} ->
         Logger.warning("MachineFSM[#{state.id}] migration failed to start",
@@ -625,7 +669,7 @@ defmodule Orchestrator.MachineFSM do
   defp perform_health_check(state) do
     Logger.debug("MachineFSM[#{state.id}] performing health check")
 
-    case FlydClient.get_machine(state.id) do
+    case @flyd_client.get_machine(state.id) do
       {:ok, machine_data} ->
         health_status = machine_data["status"] || "unknown"
         new_state = %{state | last_health_check_at: DateTime.utc_now(), health_check_failures: 0}
@@ -803,31 +847,54 @@ defmodule Orchestrator.MachineFSM do
   end
 
   defp persist_event(machine_id, type, payload) do
-    %MachineEvent{}
-    |> MachineEvent.changeset(%{
-      machine_id: machine_id,
-      type: type,
-      payload: payload,
-      created_at: DateTime.utc_now()
-    })
-    |> Repo.insert!()
+    payload =
+      cond do
+        is_struct(payload) -> Map.from_struct(payload)
+        is_map(payload) -> payload
+        is_nil(payload) -> %{}
+        true -> %{value: inspect(payload)}
+      end
+    case Repo.get(Machine, machine_id) do
+      nil ->
+        Logger.warning("Cannot persist event: machine #{machine_id} not found in DB",
+          event_type: type
+        )
+        :ok
+
+      _machine ->
+        %MachineEvent{}
+        |> MachineEvent.changeset(%{
+          machine_id: machine_id,
+          type: type,
+          payload: payload,
+          created_at: DateTime.utc_now()
+        })
+        |> Repo.insert!()
+    end
   rescue
     e ->
-      Logger.error("MachineFSM failed to persist event",
+      Logger.error("MachineFSM failed to persist event: #{inspect(e)}",
         machine_id: machine_id,
-        type: type,
-        error: inspect(e)
+        type: type
       )
 
       :ok
   end
 
-  defp persist_db_update(id, attrs) do
+  defp persist_db_update(state, attrs) do
+    id = state.id
+
     Repo.transaction(fn ->
       case Repo.get(Machine, id) do
         nil ->
           %Machine{}
-          |> Machine.changeset(Map.put(attrs, "id", id))
+          |> Machine.changeset(
+            attrs
+            |> Map.put(:id, id)
+            |> Map.put_new(:name, state.name)
+            |> Map.put_new(:region, state.region)
+            |> Map.put_new(:machine_type, state.machine_type)
+          )
           |> Repo.insert!()
 
           :ok
@@ -842,9 +909,8 @@ defmodule Orchestrator.MachineFSM do
     end)
   rescue
     e ->
-      Logger.error("MachineFSM failed to persist DB update",
-        machine_id: id,
-        error: inspect(e)
+      Logger.error("MachineFSM failed to persist DB update: #{inspect(e)}",
+        machine_id: state.id
       )
 
       {:error, :db_error}
@@ -862,7 +928,7 @@ defmodule Orchestrator.MachineFSM do
   defp normalize_status(status) when is_atom(status), do: status
 
   defp normalize_status(status) when is_binary(status) do
-    String.to_existing_atom(status)
+    String.to_atom(status)
   rescue
     ArgumentError -> :created
   end

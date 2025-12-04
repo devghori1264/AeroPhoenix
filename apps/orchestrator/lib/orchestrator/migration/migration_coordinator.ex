@@ -44,6 +44,21 @@ defmodule Orchestrator.Migration.MigrationCoordinator do
     GenServer.call(__MODULE__, {:migrate, machine_id, opts}, :infinity)
   end
 
+  @spec get_migration_status(machine_id()) :: {:ok, migration_state()} | {:error, :not_found}
+  def get_migration_status(machine_id) do
+    GenServer.call(__MODULE__, {:get_migration_status, machine_id})
+  end
+
+  @spec cancel_migration(machine_id()) :: :ok | {:error, term()}
+  def cancel_migration(machine_id) do
+    GenServer.call(__MODULE__, {:cancel_migration, machine_id})
+  end
+
+  @spec list_active_migrations() :: [migration_state()]
+  def list_active_migrations do
+    GenServer.call(__MODULE__, :list_active_migrations)
+  end
+
   @spec stats() :: map()
   def stats do
     GenServer.call(__MODULE__, :stats)
@@ -67,69 +82,107 @@ defmodule Orchestrator.Migration.MigrationCoordinator do
 
   @impl true
   def handle_call({:migrate, machine_id, opts}, _from, state) do
-    source_region = Keyword.fetch!(opts, :source_region)
-    dest_region = Keyword.fetch!(opts, :dest_region)
-    enable_rollback = Keyword.get(opts, :enable_rollback, true)
+    with {:ok, source_region} <- Keyword.fetch(opts, :source_region),
+         {:ok, dest_region} <- Keyword.fetch(opts, :dest_region) do
+      enable_rollback = Keyword.get(opts, :enable_rollback, true)
 
-    Logger.info("Starting live migration",
-      machine_id: machine_id,
-      source: source_region,
-      dest: dest_region
-    )
+      Logger.info("Starting live migration",
+        machine_id: machine_id,
+        source: source_region,
+        dest: dest_region
+      )
 
-    restore_point =
-      if enable_rollback do
-        create_restore_point(machine_id, source_region)
-      else
-        nil
-      end
+      restore_point =
+        if enable_rollback do
+          create_restore_point(machine_id, source_region)
+        else
+          nil
+        end
 
-    migration_state = %{
-      machine_id: machine_id,
-      source_region: source_region,
-      dest_region: dest_region,
-      phase: :pre_copy,
-      started_at: System.monotonic_time(:millisecond),
-      restore_point: restore_point
-    }
+      migration_state = %{
+        machine_id: machine_id,
+        source_region: source_region,
+        dest_region: dest_region,
+        phase: :pre_copy,
+        started_at: System.monotonic_time(:millisecond),
+        restore_point: restore_point
+      }
 
-    new_state = put_in(state, [:active_migrations, machine_id], migration_state)
+      new_state = put_in(state, [:active_migrations, machine_id], migration_state)
 
-    result =
-      try do
-        perform_migration(migration_state)
-      rescue
-        error ->
-          Logger.error("Migration failed with exception",
-            machine_id: machine_id,
-            error: inspect(error)
-          )
+      result =
+        try do
+          perform_migration(migration_state)
+        rescue
+          error ->
+            Logger.error("Migration failed with exception",
+              machine_id: machine_id,
+              error: inspect(error)
+            )
 
-          {:error, {:exception, error}}
-      end
+            {:error, {:exception, error}}
+        end
 
-    final_state =
-      case result do
-        {:ok, _dest_region} ->
-          new_state
-          |> update_in([:stats, :completed], &(&1 + 1))
-          |> update_in([:active_migrations], &Map.delete(&1, machine_id))
+      final_state =
+        case result do
+          {:ok, _dest_region} ->
+            new_state
+            |> update_in([:stats, :completed], &(&1 + 1))
+            |> update_in([:active_migrations], &Map.delete(&1, machine_id))
 
-        {:error, reason} when enable_rollback ->
-          Logger.warning("Migration failed, initiating rollback", reason: reason)
-          rollback_migration(migration_state)
+          {:error, reason} when enable_rollback ->
+            Logger.warning("Migration failed, initiating rollback", reason: reason)
+            rollback_migration(migration_state)
 
-          new_state
+            new_state
+            |> update_in([:stats, :rolled_back], &(&1 + 1))
+            |> update_in([:active_migrations], &Map.delete(&1, machine_id))
+
+          {:error, _reason} ->
+            new_state
+            |> update_in([:stats, :failed], &(&1 + 1))
+            |> update_in([:active_migrations], &Map.delete(&1, machine_id))
+        end
+
+      {:reply, result, final_state}
+    else
+      :error ->
+        {:reply, {:error, :missing_region_options}, state}
+    end
+
+  end
+
+  @impl true
+  def handle_call({:get_migration_status, machine_id}, _from, state) do
+    case Map.get(state.active_migrations, machine_id) do
+      nil -> {:reply, {:error, :not_found}, state}
+      migration_state -> {:reply, {:ok, migration_state}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:cancel_migration, machine_id}, _from, state) do
+    case Map.get(state.active_migrations, machine_id) do
+      nil ->
+        {:reply, {:error, :not_found}, state}
+
+      migration_state ->
+        Logger.info("Cancelling migration", machine_id: machine_id)
+        rollback_migration(migration_state)
+
+        new_state =
+          state
           |> update_in([:stats, :rolled_back], &(&1 + 1))
           |> update_in([:active_migrations], &Map.delete(&1, machine_id))
 
-        {:error, _reason} ->
-          new_state
-          |> update_in([:stats, :failed], &(&1 + 1))
-          |> update_in([:active_migrations], &Map.delete(&1, machine_id))
-      end
+        {:reply, :ok, new_state}
+    end
+  end
 
-    {:reply, result, final_state}
+  @impl true
+  def handle_call(:list_active_migrations, _from, state) do
+    migrations = Map.values(state.active_migrations)
+    {:reply, migrations, state}
   end
 
   @impl true
@@ -144,6 +197,11 @@ defmodule Orchestrator.Migration.MigrationCoordinator do
       })
 
     {:reply, stats, state}
+  end
+
+  @impl true
+  def handle_info(_msg, state) do
+    {:noreply, state}
   end
 
   defp perform_migration(migration_state) do

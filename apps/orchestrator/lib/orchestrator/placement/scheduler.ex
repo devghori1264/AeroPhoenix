@@ -1,7 +1,7 @@
 defmodule Orchestrator.Placement.Scheduler do
   use GenServer
   require Logger
-  alias Orchestrator.{Repo, Machine}
+  alias Orchestrator.{Repo, Machines.Machine}
   alias Orchestrator.Placement.{ComplianceRules, CostModel, LatencyMatrix}
   import Ecto.Query
 
@@ -77,7 +77,7 @@ defmodule Orchestrator.Placement.Scheduler do
       weights: Keyword.get(opts, :weights, @default_weights)
     }
 
-    Logger.info("Placement Scheduler started",
+    Logger.debug("Placement Scheduler started",
       regions: length(regions),
       latency_matrix_size: map_size(latency_matrix)
     )
@@ -88,7 +88,9 @@ defmodule Orchestrator.Placement.Scheduler do
 
   @impl true
   def handle_call({:schedule_machine, requirements, opts}, _from, state) do
-    Logger.info("Scheduling machine placement", requirements: sanitize_for_log(requirements))
+    opts = if is_map(opts), do: Enum.to_list(opts), else: opts
+
+    Logger.debug("Scheduling machine placement", requirements: sanitize_for_log(requirements))
     result = perform_scheduling(requirements, opts, state)
 
     case result do
@@ -112,7 +114,9 @@ defmodule Orchestrator.Placement.Scheduler do
 
   @impl true
   def handle_call({:schedule_batch, requirements_list, opts}, _from, state) do
-    Logger.info("Batch scheduling #{length(requirements_list)} machines")
+    opts = if is_map(opts), do: Enum.to_list(opts), else: opts
+
+    Logger.debug("Batch scheduling #{length(requirements_list)} machines")
     result = perform_batch_scheduling(requirements_list, opts, state)
 
     case result do
@@ -138,7 +142,7 @@ defmodule Orchestrator.Placement.Scheduler do
 
   @impl true
   def handle_call({:reoptimize, opts}, _from, state) do
-    Logger.info("Re-optimizing machine placements")
+    Logger.debug("Re-optimizing machine placements")
     result = analyze_reoptimization_opportunities(state, opts)
     {:reply, {:ok, result}, state}
   end
@@ -173,6 +177,7 @@ defmodule Orchestrator.Placement.Scheduler do
   end
 
   defp perform_scheduling(requirements, opts, state) do
+    opts = if is_map(opts), do: Enum.to_list(opts), else: opts
     strategy = Keyword.get(opts, :strategy, :balanced)
     candidate_regions = Keyword.get(opts, :candidate_regions)
 
@@ -210,7 +215,7 @@ defmodule Orchestrator.Placement.Scheduler do
 
       best_placement = Enum.max_by(scored_regions, & &1.score)
 
-      Logger.info("Selected placement",
+      Logger.debug("Selected placement",
         region: best_placement.region,
         score: Float.round(best_placement.score, 3)
       )
@@ -349,7 +354,8 @@ defmodule Orchestrator.Placement.Scheduler do
     capacity = Map.get(capacity_tracking, region)
 
     if capacity do
-      total_cpu_after = capacity.used_cpu_cores + requirements.cpu_cores
+      cpu_required = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
+      total_cpu_after = capacity.used_cpu_cores + cpu_required
       total_mem_after = capacity.used_memory_gb + requirements.memory_gb
       total_disk_after = capacity.used_disk_gb + requirements.disk_gb
       cpu_util = total_cpu_after / capacity.total_cpu_cores
@@ -367,7 +373,7 @@ defmodule Orchestrator.Placement.Scheduler do
   end
 
   defp score_latency(region, requirements, latency_matrix) do
-    traffic_sources = requirements[:traffic_sources] || []
+    traffic_sources = Map.get(requirements, :traffic_sources, [])
 
     if Enum.empty?(traffic_sources) do
       1.0
@@ -386,10 +392,11 @@ defmodule Orchestrator.Placement.Scheduler do
     cost_model = Map.get(cost_models, region)
 
     if cost_model do
+      cpu_required = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
       monthly_cost =
         CostModel.calculate_monthly_cost(
           cost_model,
-          requirements.cpu_cores,
+          cpu_required,
           requirements.memory_gb,
           requirements.disk_gb
         )
@@ -407,7 +414,7 @@ defmodule Orchestrator.Placement.Scheduler do
   end
 
   defp score_compliance(region, requirements, compliance_rules) do
-    compliance = requirements[:compliance] || %{}
+    compliance = Map.get(requirements, :compliance, %{})
     all_satisfied = ComplianceRules.check_compliance(compliance_rules, region, compliance)
     if all_satisfied, do: 1.0, else: 0.0
   end
@@ -495,19 +502,27 @@ defmodule Orchestrator.Placement.Scheduler do
     available_memory = capacity.total_memory_gb - capacity.used_memory_gb
     available_disk = capacity.total_disk_gb - capacity.used_disk_gb
 
-    available_cpu >= requirements.cpu_cores &&
-      available_memory >= requirements.memory_gb &&
-      available_disk >= requirements.disk_gb
+    req_cpu = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
+    req_memory = Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+    req_disk = Map.get(requirements, :disk_gb) || (Map.get(requirements, :disk_mb) || 0) / 1024
+
+    available_cpu >= req_cpu &&
+      available_memory >= req_memory &&
+      available_disk >= req_disk
   end
 
   defp reserve_capacity(state, region, requirements) do
+    req_cpu = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
+    req_memory = Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+    req_disk = Map.get(requirements, :disk_gb) || (Map.get(requirements, :disk_mb) || 0) / 1024
+
     update_in(state, [:capacity_tracking, region], fn capacity ->
       if capacity do
         %{
           capacity
-          | used_cpu_cores: capacity.used_cpu_cores + requirements.cpu_cores,
-            used_memory_gb: capacity.used_memory_gb + requirements.memory_gb,
-            used_disk_gb: capacity.used_disk_gb + requirements.disk_gb
+          | used_cpu_cores: capacity.used_cpu_cores + req_cpu,
+            used_memory_gb: capacity.used_memory_gb + req_memory,
+            used_disk_gb: capacity.used_disk_gb + req_disk
         }
       else
         capacity
@@ -516,13 +531,17 @@ defmodule Orchestrator.Placement.Scheduler do
   end
 
   defp deduct_capacity(capacity_tracking, region, requirements) do
+    req_cpu = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
+    req_memory = Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+    req_disk = Map.get(requirements, :disk_gb) || (Map.get(requirements, :disk_mb) || 0) / 1024
+
     update_in(capacity_tracking, [region], fn capacity ->
       if capacity do
         %{
           capacity
-          | used_cpu_cores: capacity.used_cpu_cores + requirements.cpu_cores,
-            used_memory_gb: capacity.used_memory_gb + requirements.memory_gb,
-            used_disk_gb: capacity.used_disk_gb + requirements.disk_gb
+          | used_cpu_cores: capacity.used_cpu_cores + req_cpu,
+            used_memory_gb: capacity.used_memory_gb + req_memory,
+            used_disk_gb: capacity.used_disk_gb + req_disk
         }
       else
         capacity
@@ -557,7 +576,7 @@ defmodule Orchestrator.Placement.Scheduler do
   end
 
   defp filter_by_compliance(regions, requirements, compliance_rules) do
-    compliance = requirements[:compliance] || %{}
+    compliance = Map.get(requirements, :compliance, %{})
 
     Enum.filter(regions, fn region ->
       ComplianceRules.check_compliance(compliance_rules, region, compliance)
@@ -566,13 +585,14 @@ defmodule Orchestrator.Placement.Scheduler do
 
   defp calculate_resource_allocation(region, requirements, state) do
     capacity = Map.get(state.capacity_tracking, region)
+    cpu_required = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
 
     %{
-      cpu_cores: requirements.cpu_cores,
+      cpu_cores: cpu_required,
       memory_gb: requirements.memory_gb,
       disk_gb: requirements.disk_gb,
       region_cpu_utilization:
-        (capacity.used_cpu_cores + requirements.cpu_cores) / capacity.total_cpu_cores,
+        (capacity.used_cpu_cores + cpu_required) / capacity.total_cpu_cores,
       region_memory_utilization:
         (capacity.used_memory_gb + requirements.memory_gb) / capacity.total_memory_gb
     }
@@ -582,9 +602,10 @@ defmodule Orchestrator.Placement.Scheduler do
     cost_model = Map.get(cost_models, region)
 
     if cost_model do
+      cpu_required = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
       CostModel.calculate_monthly_cost(
         cost_model,
-        requirements.cpu_cores,
+        cpu_required,
         requirements.memory_gb,
         requirements.disk_gb
       )
@@ -594,7 +615,7 @@ defmodule Orchestrator.Placement.Scheduler do
   end
 
   defp calculate_expected_latency(region, requirements, latency_matrix) do
-    traffic_sources = requirements[:traffic_sources] || []
+    traffic_sources = Map.get(requirements, :traffic_sources, [])
 
     if Enum.empty?(traffic_sources) do
       0.0

@@ -59,11 +59,13 @@ defmodule Orchestrator.Recovery.DriftDetector do
     timeout = Keyword.get(opts, :timeout, 5_000)
     skip_state_check = Keyword.get(opts, :skip_state_check, false)
     parallel = Keyword.get(opts, :parallel, false)
+    data_dir = Keyword.get(opts, :data_dir, Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines"))
 
     Logger.info("Starting drift detection scan",
       node: node(),
       timeout: timeout,
-      skip_state_check: skip_state_check
+      skip_state_check: skip_state_check,
+      data_dir: data_dir
     )
 
     try do
@@ -79,7 +81,7 @@ defmodule Orchestrator.Recovery.DriftDetector do
         registered_machines: length(registry_entries)
       )
 
-      db_machines = get_database_machines()
+      db_machines = get_database_machines(data_dir)
 
       Logger.debug("Database scan complete",
         db_active_machines: length(db_machines)
@@ -163,22 +165,93 @@ defmodule Orchestrator.Recovery.DriftDetector do
     end
   end
 
-  @spec check_machine(machine_id()) ::
+  @spec check_machine(machine_id(), keyword()) ::
           {:ok, :healthy}
           | {:ok, {:anomaly, anomaly()}}
           | {:error, :not_found | term()}
-  def check_machine(machine_id) when is_binary(machine_id) do
-    db_path = get_db_path(machine_id)
+  def check_machine(machine_id, opts \\ []) when is_binary(machine_id) do
+    data_dir = Keyword.get(opts, :data_dir, Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines"))
+    db_path = get_db_path(machine_id, data_dir)
 
     unless File.exists?(db_path) do
       {:error, :not_found}
     else
       registry_pid = get_registry_pid(machine_id)
 
-      {:ok, db_state} = get_db_state(machine_id)
+      {:ok, db_state} = get_db_state(machine_id, data_dir)
 
       perform_drift_check(machine_id, registry_pid, db_state, db_path)
     end
+  end
+
+  defp get_database_machines(data_dir) do
+    case File.ls(data_dir) do
+      {:ok, files} ->
+        files
+        |> Enum.filter(&String.ends_with?(&1, ".db"))
+        |> Enum.map(fn filename ->
+          machine_id = String.replace_suffix(filename, ".db", "")
+          db_path = Path.join(data_dir, filename)
+
+          case get_db_state(machine_id, data_dir) do
+            {:ok, state} ->
+              %{
+                machine_id: machine_id,
+                db_path: db_path,
+                state: state
+              }
+
+            {:error, _reason} ->
+              %{
+                machine_id: machine_id,
+                db_path: db_path,
+                state: :unknown
+              }
+          end
+        end)
+
+      {:ok, []} ->
+        []
+
+      {:error, :enoent} ->
+        []
+
+      {:error, reason} ->
+        Logger.error("Failed to scan machine data directory",
+          reason: inspect(reason)
+        )
+
+        []
+    end
+  end
+
+  defp get_db_state(machine_id, data_dir) do
+    db_path = get_db_path(machine_id, data_dir)
+
+    case Storage.init(db_path) do
+      {:ok, conn} ->
+        try do
+          case Storage.load_metadata(conn) do
+            {:ok, meta} ->
+              {:ok, meta.state}
+
+            {:error, :not_found} ->
+              {:ok, :created}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
+        after
+          Storage.close(conn)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp get_db_path(machine_id, data_dir) do
+    Path.join(data_dir, "#{machine_id}.db")
   end
 
   defp perform_drift_check(machine_id, registry_pid, db_state, db_path) do
@@ -195,7 +268,7 @@ defmodule Orchestrator.Recovery.DriftDetector do
 
         {:ok, {:anomaly, anomaly}}
 
-      db_state in [:running, :starting] && registry_pid == nil ->
+      db_state in [:running, :starting, :created] && registry_pid == nil ->
         anomaly = %{
           type: :zombie,
           severity: :critical,
@@ -250,7 +323,7 @@ defmodule Orchestrator.Recovery.DriftDetector do
   end
 
   defp get_database_machines do
-    data_dir = Application.get_env(:orchestrator, :machine_data_dir, "data/machines")
+    data_dir = Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
 
     case File.ls(data_dir) do
       {:ok, files} ->
@@ -295,21 +368,18 @@ defmodule Orchestrator.Recovery.DriftDetector do
     case Storage.init(db_path) do
       {:ok, conn} ->
         try do
-          case Exqlite.Sqlite3.execute(
-                 conn,
-                 "SELECT state FROM machines LIMIT 1"
-               ) do
-            {:ok, %{rows: [[state_str]]}} when is_binary(state_str) ->
-              {:ok, String.to_existing_atom(state_str)}
+          case Storage.load_metadata(conn) do
+            {:ok, meta} ->
+              {:ok, meta.state}
 
-            {:ok, %{rows: []}} ->
+            {:error, :not_found} ->
               {:ok, :created}
 
             {:error, reason} ->
               {:error, reason}
           end
         after
-          Exqlite.Sqlite3.close(conn)
+          Storage.close(conn)
         end
 
       {:error, reason} ->
@@ -318,7 +388,7 @@ defmodule Orchestrator.Recovery.DriftDetector do
   end
 
   defp get_db_path(machine_id) do
-    data_dir = Application.get_env(:orchestrator, :machine_data_dir, "data/machines")
+    data_dir = Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
     Path.join(data_dir, "#{machine_id}.db")
   end
 
@@ -339,12 +409,12 @@ defmodule Orchestrator.Recovery.DriftDetector do
   end
 
   defp detect_anomalies_sequential(
-         all_processes,
-         registry_entries,
-         db_machines,
-         timeout,
-         skip_state_check
-       ) do
+          all_processes,
+          registry_entries,
+          db_machines,
+          timeout,
+          skip_state_check
+        ) do
     ghosts = detect_ghosts(registry_entries, all_processes)
     zombies = detect_zombies(db_machines, registry_entries)
 
@@ -359,12 +429,12 @@ defmodule Orchestrator.Recovery.DriftDetector do
   end
 
   defp detect_anomalies_parallel(
-         all_processes,
-         registry_entries,
-         db_machines,
-         timeout,
-         skip_state_check
-       ) do
+          all_processes,
+          registry_entries,
+          db_machines,
+          timeout,
+          skip_state_check
+        ) do
     tasks = [
       Task.async(fn -> detect_ghosts(registry_entries, all_processes) end),
       Task.async(fn -> detect_zombies(db_machines, registry_entries) end)
@@ -386,9 +456,17 @@ defmodule Orchestrator.Recovery.DriftDetector do
       Task.yield_many(tasks, timeout + 1_000)
       |> Enum.map(fn {task, result} ->
         case result do
-          {:ok, anomalies} -> anomalies
-          nil -> Task.shutdown(task, :brutal_kill)
-          [] -> []
+          {:ok, []} ->
+            []
+          {:ok, anomalies} ->
+            anomalies
+          {:exit, _reason} ->
+            []
+          nil ->
+            case Task.shutdown(task, :brutal_kill) do
+              {:ok, res} -> res
+              _ -> []
+            end
         end
       end)
       |> List.flatten()
@@ -421,7 +499,7 @@ defmodule Orchestrator.Recovery.DriftDetector do
     registry_map = Map.new(registry_entries, fn {id, pid} -> {id, pid} end)
 
     Enum.reduce(db_machines, [], fn machine, acc ->
-      if machine.state in [:running, :starting] do
+      if machine.state in [:running, :starting, :created] do
         case Map.get(registry_map, machine.machine_id) do
           nil ->
             zombie = %{
@@ -472,7 +550,7 @@ defmodule Orchestrator.Recovery.DriftDetector do
             acc
 
           {:error, reason} ->
-            Logger.warning("Failed to get process state for drift check",
+            Logger.debug("Failed to get process state for drift check",
               machine_id: machine_id,
               pid: inspect(pid),
               reason: inspect(reason)

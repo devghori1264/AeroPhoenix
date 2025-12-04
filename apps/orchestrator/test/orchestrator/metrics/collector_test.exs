@@ -4,14 +4,13 @@ defmodule Orchestrator.Metrics.CollectorTest do
   alias Orchestrator.Metrics.Collector
 
   setup do
-    {:ok, pid} = Collector.start_link()
+    pid = Process.whereis(Collector)
+
+    :ets.delete_all_objects(:metrics_counters)
+    :ets.delete_all_objects(:metrics_gauges)
+    :ets.delete_all_objects(:metrics_histograms)
 
     on_exit(fn ->
-      if Process.alive?(pid) do
-        Collector.detach_handlers()
-        Process.exit(pid, :normal)
-      end
-
       :ets.delete_all_objects(:metrics_counters)
       :ets.delete_all_objects(:metrics_gauges)
       :ets.delete_all_objects(:metrics_histograms)
@@ -219,7 +218,8 @@ defmodule Orchestrator.Metrics.CollectorTest do
 
       output = Collector.prometheus_format()
 
-      assert output =~ ~r/requests_total\{method="GET",status="200"\} 100/
+      assert output =~ ~r/requests_total\{.*method="GET".*\} 100/
+      assert output =~ ~r/requests_total\{.*status="200".*\} 100/
     end
 
     test "formats gauge" do
@@ -237,11 +237,12 @@ defmodule Orchestrator.Metrics.CollectorTest do
       output = Collector.prometheus_format()
 
       assert output =~ "# TYPE request_duration_seconds histogram"
-      assert output =~ ~r/request_duration_seconds_bucket\{le="0.001"\}/
-      assert output =~ ~r/request_duration_seconds_bucket\{le="1.0"\}/
-      assert output =~ ~r/request_duration_seconds_bucket\{le="\+Inf"\}/
-      assert output =~ "request_duration_seconds_sum"
-      assert output =~ "request_duration_seconds_count"
+      assert output =~ ~r/request_duration_seconds_bucket\{le="0.001"\} 0/
+      assert output =~ ~r/request_duration_seconds_bucket\{le="0.5"\} 1/
+      assert output =~ ~r/request_duration_seconds_bucket\{le="1.0"\} 1/
+      assert output =~ ~r/request_duration_seconds_bucket\{le="\+Inf"\} 1/
+      assert output =~ "request_duration_seconds_sum 0.5"
+      assert output =~ "request_duration_seconds_count 1"
     end
 
     test "handles metrics without labels" do

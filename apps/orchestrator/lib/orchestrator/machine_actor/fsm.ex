@@ -29,6 +29,7 @@ defmodule Orchestrator.MachineActor.FSM do
 
   @transitions %{
     {:created, :start} => :starting,
+    {:created, :migrate} => :migrating,
     {:starting, :provision_complete} => :running,
     {:starting, :provision_failed} => :error,
     {:running, :stop} => :stopping,
@@ -42,6 +43,7 @@ defmodule Orchestrator.MachineActor.FSM do
     {:stopping, :stop_failed} => :error,
     {:stopped, :start} => :starting,
     {:stopped, :destroy} => :destroying,
+    {:stopped, :migrate} => :migrating,
     {:migrating, :migration_complete} => :running,
     {:migrating, :migration_failed} => :running,
     {:destroying, :destroy_complete} => :destroyed,
@@ -72,7 +74,7 @@ defmodule Orchestrator.MachineActor.FSM do
     end
   end
 
-  @spec resolve_target_state(transition_type(), keyword()) :: state()
+  @spec resolve_target_state(transition_type() | state(), keyword()) :: state()
   def resolve_target_state(transition_type, _opts \\ []) do
     case transition_type do
       :start -> :starting
@@ -82,6 +84,7 @@ defmodule Orchestrator.MachineActor.FSM do
       :resume -> :starting
       :restart -> :stopping
       :migrate -> :migrating
+      state when state in [:created, :starting, :running, :suspended, :stopping, :stopped, :migrating, :destroying, :destroyed, :error] -> state
     end
   end
 
@@ -106,7 +109,7 @@ defmodule Orchestrator.MachineActor.FSM do
   @spec locked?(state()) :: boolean()
   def locked?(state), do: state in @locked_states
 
-  @spec check_preconditions(transition_type(), state(), keyword()) ::
+  @spec check_preconditions(transition_type() | state(), state(), keyword()) ::
           :ok | {:error, transition_error()}
   def check_preconditions(transition_type, current_state, opts \\ []) do
     case transition_type do
@@ -118,6 +121,9 @@ defmodule Orchestrator.MachineActor.FSM do
 
       :suspend ->
         check_suspend_preconditions(current_state)
+
+      state when state in [:created, :starting, :running, :suspended, :stopping, :stopped, :migrating, :destroying, :destroyed, :error] ->
+        :ok
 
       _ ->
         :ok

@@ -31,8 +31,8 @@ defmodule Orchestrator.Replication.CRDTState do
           lww_registers: %{atom() => {term(), HybridLogicalClock.t()}},
           orsets: %{
             atom() => %{
-              additions: %{term() => tag()},
-              tombstones: %{term() => tag()}
+              additions: %{term() => MapSet.t(tag())},
+              tombstones: MapSet.t(tag())
             }
           },
           hlc: HybridLogicalClock.t(),
@@ -79,6 +79,12 @@ defmodule Orchestrator.Replication.CRDTState do
     {:ok, crdt}
   end
 
+  @spec new(machine_id()) :: t()
+  def new(machine_id) do
+    {:ok, crdt} = init(machine_id: machine_id)
+    crdt
+  end
+
   @spec increment_counter(t(), atom(), non_neg_integer()) ::
           {:ok, delta(), t()} | {:error, term()}
   def increment_counter(_crdt, _counter_name, amount) when amount < 0 do
@@ -107,7 +113,7 @@ defmodule Orchestrator.Replication.CRDTState do
       node_id: crdt.node_id,
       hlc: new_hlc,
       vclock: new_vclock,
-      operations: [{:gcounter_inc, counter_name, amount}],
+      operations: [{:gcounter_inc, counter_name, new_value}],
       compressed: false
     }
 
@@ -172,9 +178,11 @@ defmodule Orchestrator.Replication.CRDTState do
     tag_counter = VectorClock.get(crdt.vclock, crdt.node_id)
     tag = {crdt.node_id, tag_counter}
 
-    current_set = Map.get(crdt.orsets, set_name, %{additions: %{}, tombstones: %{}})
+    current_set = Map.get(crdt.orsets, set_name, %{additions: %{}, tombstones: MapSet.new()})
 
-    updated_additions = Map.put(current_set.additions, element, tag)
+    current_tags = Map.get(current_set.additions, element, MapSet.new())
+    updated_tags = MapSet.put(current_tags, tag)
+    updated_additions = Map.put(current_set.additions, element, updated_tags)
     updated_set = %{current_set | additions: updated_additions}
     updated_orsets = Map.put(crdt.orsets, set_name, updated_set)
 
@@ -209,17 +217,20 @@ defmodule Orchestrator.Replication.CRDTState do
 
   @spec remove_from_set(t(), atom(), term()) :: {:ok, delta(), t()} | {:error, :not_found}
   def remove_from_set(crdt, set_name, element) do
-    current_set = Map.get(crdt.orsets, set_name, %{additions: %{}, tombstones: %{}})
+    current_set = Map.get(crdt.orsets, set_name, %{additions: %{}, tombstones: MapSet.new()})
 
     case Map.get(current_set.additions, element) do
       nil ->
         {:error, :not_found}
 
-      tag ->
+      tags ->
+
         new_hlc = HybridLogicalClock.tick(crdt.hlc)
         new_vclock = VectorClock.increment(crdt.vclock, crdt.node_id)
 
-        updated_tombstones = Map.put(current_set.tombstones, element, tag)
+        ops = Enum.map(tags, fn tag -> {:orset_remove, set_name, element, tag} end)
+
+        updated_tombstones = MapSet.union(current_set.tombstones, tags)
         updated_set = %{current_set | tombstones: updated_tombstones}
         updated_orsets = Map.put(crdt.orsets, set_name, updated_set)
 
@@ -228,7 +239,7 @@ defmodule Orchestrator.Replication.CRDTState do
           node_id: crdt.node_id,
           hlc: new_hlc,
           vclock: new_vclock,
-          operations: [{:orset_remove, set_name, element, tag}],
+          operations: ops,
           compressed: false
         }
 
@@ -245,7 +256,7 @@ defmodule Orchestrator.Replication.CRDTState do
 
         :telemetry.execute(
           [:crdt_state, :set_element_removed],
-          %{tombstone_count: map_size(updated_tombstones)},
+          %{tombstone_count: MapSet.size(updated_tombstones)},
           %{machine_id: crdt.machine_id, set: set_name}
         )
 
@@ -266,7 +277,7 @@ defmodule Orchestrator.Replication.CRDTState do
 
       updated_crdt =
         Enum.reduce(delta.operations, crdt, fn op, acc ->
-          apply_operation(acc, op)
+          apply_operation(acc, op, delta.node_id)
         end)
 
       final_crdt = %{
@@ -293,9 +304,9 @@ defmodule Orchestrator.Replication.CRDTState do
   @spec get_value(t()) :: crdt_value()
   def get_value(crdt) do
     %{
-      stats: materialize_gcounters(crdt.gcounters),
-      metadata: materialize_lww_registers(crdt.lww_registers),
-      capabilities: materialize_orsets(crdt.orsets),
+      counters: materialize_gcounters(crdt.gcounters),
+      registers: materialize_lww_registers(crdt.lww_registers),
+      sets: materialize_orsets(crdt.orsets),
       _meta: %{
         node_id: crdt.node_id,
         hlc: HybridLogicalClock.to_timestamp(crdt.hlc),
@@ -303,6 +314,73 @@ defmodule Orchestrator.Replication.CRDTState do
         updated_at: crdt.updated_at
       }
     }
+  end
+
+  @spec get_counter(t(), atom()) :: non_neg_integer()
+  def get_counter(crdt, counter_name) do
+    crdt.gcounters
+    |> Map.get(counter_name, %{})
+    |> Map.values()
+    |> Enum.sum()
+  end
+
+  @spec get_set(t(), atom()) :: MapSet.t()
+  def get_set(crdt, set_name) do
+    set_data = Map.get(crdt.orsets, set_name, %{additions: %{}, tombstones: %{}})
+
+    set_data.additions
+    |> Map.keys()
+    |> Enum.reject(fn elem ->
+      tags = Map.get(set_data.additions, elem)
+      Enum.all?(tags, fn tag -> MapSet.member?(set_data.tombstones, tag) end)
+    end)
+    |> MapSet.new()
+  end
+
+  @spec get_register(t(), atom()) :: term() | nil
+  def get_register(crdt, register_name) do
+    case Map.get(crdt.lww_registers, register_name) do
+      {value, _hlc} -> value
+      nil -> nil
+    end
+  end
+
+  def to_map(crdt), do: get_value(crdt)
+
+  def get_state(crdt), do: get_value(crdt)
+
+  def get_delta(crdt) do
+    case DeltaBuffer.flush(crdt.delta_buffer) do
+      {:ok, nil, _} ->
+        nil
+
+      {:ok, operations, _} ->
+        %{
+          machine_id: crdt.machine_id,
+          node_id: crdt.node_id,
+          hlc: crdt.hlc,
+          vclock: crdt.vclock,
+          operations: operations,
+          compressed: false
+        }
+    end
+  end
+
+  def mark_clean(crdt) do
+    {:ok, _empty_buffer} =
+      DeltaBuffer.init(machine_id: crdt.machine_id)
+      |> DeltaBuffer.flush()
+      |> elem(2)
+      |> then(&{:ok, &1})
+
+    %{crdt | delta_buffer: DeltaBuffer.init(machine_id: crdt.machine_id)}
+  end
+
+  def compress_delta(delta) do
+    {:ok, do_compress_delta(delta)}
+  end
+  def decompress_delta(delta) do
+    {:ok, maybe_decompress_delta(delta)}
   end
 
   @spec flush_deltas(t()) :: {:ok, delta() | nil, t()}
@@ -323,7 +401,7 @@ defmodule Orchestrator.Replication.CRDTState do
 
         final_delta =
           if byte_size(:erlang.term_to_binary(batched_delta)) > 1024 do
-            compress_delta(batched_delta)
+            do_compress_delta(batched_delta)
           else
             batched_delta
           end
@@ -356,38 +434,38 @@ defmodule Orchestrator.Replication.CRDTState do
     additions =
       Enum.with_index(capabilities)
       |> Enum.into(%{}, fn {cap, idx} ->
-        {cap, {node_id, idx}}
+        {cap, MapSet.new([{node_id, idx}])}
       end)
 
-    %{capabilities: %{additions: additions, tombstones: %{}}}
+    %{capabilities: %{additions: additions, tombstones: MapSet.new()}}
   end
 
-  defp apply_operation(crdt, {:gcounter_inc, counter_name, amount}) do
+  defp apply_operation(crdt, {:gcounter_inc, counter_name, amount}, node_id) do
     updated_gcounters =
       Map.update(
         crdt.gcounters,
         counter_name,
-        %{crdt.node_id => amount},
+        %{node_id => amount},
         fn counter ->
-          current = Map.get(counter, crdt.node_id, 0)
-          Map.put(counter, crdt.node_id, max(current, amount))
+          current = Map.get(counter, node_id, 0)
+          Map.put(counter, node_id, max(current, amount))
         end
       )
 
     %{crdt | gcounters: updated_gcounters}
   end
 
-  defp apply_operation(crdt, {:lww_set, register_name, value, hlc}) do
+  defp apply_operation(crdt, {:lww_set, register_name, value, hlc}, _node_id) do
     updated_registers =
       Map.update(
         crdt.lww_registers,
         register_name,
         {value, hlc},
         fn {current_value, current_hlc} ->
-          if HybridLogicalClock.compare(hlc, current_hlc) == :gt do
-            {value, hlc}
-          else
-            {current_value, current_hlc}
+          case HybridLogicalClock.compare(hlc, current_hlc) do
+            :gt -> {value, hlc}
+            :lt -> {current_value, current_hlc}
+            :eq -> if value > current_value, do: {value, hlc}, else: {current_value, current_hlc}
           end
         end
       )
@@ -395,14 +473,16 @@ defmodule Orchestrator.Replication.CRDTState do
     %{crdt | lww_registers: updated_registers}
   end
 
-  defp apply_operation(crdt, {:orset_add, set_name, element, tag}) do
+  defp apply_operation(crdt, {:orset_add, set_name, element, tag}, _node_id) do
     updated_orsets =
       Map.update(
         crdt.orsets,
         set_name,
-        %{additions: %{element => tag}, tombstones: %{}},
+        %{additions: %{element => MapSet.new([tag])}, tombstones: MapSet.new()},
         fn current_set ->
-          updated_additions = Map.put(current_set.additions, element, tag)
+          current_tags = Map.get(current_set.additions, element, MapSet.new())
+          updated_tags = MapSet.put(current_tags, tag)
+          updated_additions = Map.put(current_set.additions, element, updated_tags)
           %{current_set | additions: updated_additions}
         end
       )
@@ -410,14 +490,14 @@ defmodule Orchestrator.Replication.CRDTState do
     %{crdt | orsets: updated_orsets}
   end
 
-  defp apply_operation(crdt, {:orset_remove, set_name, element, tag}) do
+  defp apply_operation(crdt, {:orset_remove, set_name, _element, tag}, _node_id) do
     updated_orsets =
       Map.update(
         crdt.orsets,
         set_name,
-        %{additions: %{}, tombstones: %{element => tag}},
+        %{additions: %{}, tombstones: MapSet.new([tag])},
         fn current_set ->
-          updated_tombstones = Map.put(current_set.tombstones, element, tag)
+          updated_tombstones = MapSet.put(current_set.tombstones, tag)
           %{current_set | tombstones: updated_tombstones}
         end
       )
@@ -444,14 +524,16 @@ defmodule Orchestrator.Replication.CRDTState do
         set_data.additions
         |> Map.keys()
         |> Enum.reject(fn elem ->
-          Map.has_key?(set_data.tombstones, elem)
+          tags = Map.get(set_data.additions, elem)
+          is_removed = Enum.all?(tags, fn tag -> MapSet.member?(set_data.tombstones, tag) end)
+          is_removed
         end)
 
-      {set_name, live_elements}
+      {set_name, MapSet.new(live_elements)}
     end)
   end
 
-  defp compress_delta(delta) do
+  defp do_compress_delta(delta) do
     compressed_ops = :erlang.term_to_binary(delta.operations) |> :zlib.compress()
 
     %{delta | operations: {:compressed, compressed_ops}, compressed: true}

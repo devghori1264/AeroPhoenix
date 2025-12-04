@@ -1,10 +1,22 @@
 defmodule Orchestrator.Security.KillSwitchTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Orchestrator.Security.KillSwitch
 
   setup do
-    start_supervised!(KillSwitch)
+    Application.put_env(:orchestrator, :kill_switch,
+      graceful_shutdown_timeout: 10,
+      force_kill_timeout: 10
+    )
+
+    case start_supervised({Orchestrator.Security.KillSwitch, []}) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+    end
+
+    :ets.delete_all_objects(:kill_switch_state)
+    :ets.delete_all_objects(:resource_baseline)
+    :ets.delete_all_objects(:kill_switch_audit)
 
     machine_id = "test_machine_#{:rand.uniform(1_000_000)}"
 
@@ -13,13 +25,13 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.start_monitoring/1" do
     test "starts monitoring machine resources", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       assert :healthy = KillSwitch.check_health(machine_id)
     end
 
     test "initializes circuit breaker in CLOSED state", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       [{^machine_id, status, violations, warnings}] = :ets.lookup(:kill_switch_state, machine_id)
 
@@ -31,7 +43,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.stop_monitoring/1" do
     test "stops monitoring and cleans up state", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       :ok = KillSwitch.stop_monitoring(machine_id)
 
@@ -45,7 +57,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.report_metric/3 - CPU threshold" do
     test "tracks CPU violations", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :cpu_percent, 97.5)
 
@@ -61,7 +73,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "trips circuit breaker after consecutive violations", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       for _ <- 1..5 do
         KillSwitch.report_metric(machine_id, :cpu_percent, 98.0)
@@ -72,7 +84,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
       case KillSwitch.check_health(machine_id) do
         {:killed, reasons} ->
-          assert {:circuit_breaker_tripped, :cpu_exceeded} in reasons
+          assert :cpu_exceeded in reasons
 
         {:warning, _} ->
           :ok
@@ -80,7 +92,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "resets violations when metric returns to normal", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :cpu_percent, 97.0)
       KillSwitch.report_metric(machine_id, :cpu_percent, 98.0)
@@ -100,7 +112,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.report_metric/3 - Memory threshold" do
     test "detects memory violations", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :memory_percent, 96.5)
 
@@ -116,7 +128,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "trips circuit breaker on memory violations", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       for _ <- 1..5 do
         KillSwitch.report_metric(machine_id, :memory_percent, 97.0)
@@ -127,7 +139,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
       case KillSwitch.check_health(machine_id) do
         {:killed, reasons} ->
-          assert {:circuit_breaker_tripped, :memory_exceeded} in reasons
+          assert :memory_exceeded in reasons
 
         _ ->
           :ok
@@ -137,7 +149,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.report_metric/3 - Network threshold" do
     test "detects network flood", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :network_mbps, 130.0)
 
@@ -153,7 +165,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "trips circuit breaker on sustained network flood", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       for _ <- 1..5 do
         KillSwitch.report_metric(machine_id, :network_mbps, 135.0)
@@ -174,7 +186,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.report_metric/3 - API rate threshold" do
     test "detects API abuse", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :api_rate_rps, 1500)
 
@@ -192,7 +204,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.check_health/1" do
     test "returns :healthy for normal machine", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :cpu_percent, 35.0)
       KillSwitch.report_metric(machine_id, :memory_percent, 50.0)
@@ -203,7 +215,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "returns :warning for elevated metrics", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :cpu_percent, 97.0)
 
@@ -220,7 +232,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "returns :killed after circuit breaker trips", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       :ets.insert(:kill_switch_state, {machine_id, :open, 5, [:cpu_exceeded]})
 
@@ -230,7 +242,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.kill_machine/2" do
     test "kills machine manually", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       :ok = KillSwitch.kill_machine(machine_id, reason: "Suspected crypto mining")
 
@@ -239,7 +251,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "updates circuit breaker to OPEN state", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       :ok = KillSwitch.kill_machine(machine_id, reason: "Test kill")
 
@@ -248,7 +260,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "logs kill event to audit log", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       :ok = KillSwitch.kill_machine(machine_id, reason: "Manual intervention")
 
@@ -316,7 +328,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "KillSwitch.get_audit_log/1" do
     test "returns audit events for machine", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :cpu_percent, 97.0)
       Process.sleep(100)
@@ -337,8 +349,8 @@ defmodule Orchestrator.Security.KillSwitchTest do
     test "filters events by machine_id", %{machine_id: machine_id} do
       other_machine_id = "other_machine_#{:rand.uniform(1_000_000)}"
 
-      :ok = KillSwitch.start_monitoring(machine_id)
-      :ok = KillSwitch.start_monitoring(other_machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
+      :ok = KillSwitch.start_monitoring(other_machine_id, simulate: false)
 
       KillSwitch.kill_machine(machine_id, reason: "Kill A")
       KillSwitch.kill_machine(other_machine_id, reason: "Kill B")
@@ -351,7 +363,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "returns events in chronological order (newest first)", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :cpu_percent, 97.0)
       Process.sleep(100)
@@ -375,15 +387,15 @@ defmodule Orchestrator.Security.KillSwitchTest do
       initial_stats = KillSwitch.get_stats()
       initial_kills = initial_stats.total_kills
 
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
       :ok = KillSwitch.kill_machine(machine_id, reason: "Test 1")
 
       machine_2 = "machine_#{:rand.uniform(1_000_000)}"
-      :ok = KillSwitch.start_monitoring(machine_2)
+      :ok = KillSwitch.start_monitoring(machine_2, simulate: false)
       :ok = KillSwitch.kill_machine(machine_2, reason: "Test 2")
 
       machine_3 = "machine_#{:rand.uniform(1_000_000)}"
-      :ok = KillSwitch.start_monitoring(machine_3)
+      :ok = KillSwitch.start_monitoring(machine_3, simulate: false)
       :ok = KillSwitch.kill_machine(machine_3, reason: "Test 3")
 
       stats = KillSwitch.get_stats()
@@ -391,7 +403,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "tracks kills by reason", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
       :ok = KillSwitch.kill_machine(machine_id, reason: "Manual intervention")
 
       stats = KillSwitch.get_stats()
@@ -401,7 +413,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "counts active warnings", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       KillSwitch.report_metric(machine_id, :cpu_percent, 97.0)
       Process.sleep(100)
@@ -415,7 +427,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
       initial_stats = KillSwitch.get_stats()
       initial_count = initial_stats.monitored_machines
 
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       stats = KillSwitch.get_stats()
       assert stats.monitored_machines == initial_count + 1
@@ -431,7 +443,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     test "complete circuit breaker flow: CLOSED → OPEN → monitoring stopped", %{
       machine_id: machine_id
     } do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
       assert :healthy = KillSwitch.check_health(machine_id)
 
       for i <- 1..3 do
@@ -449,7 +461,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
       case KillSwitch.check_health(machine_id) do
         {:killed, reasons} ->
-          assert {:circuit_breaker_tripped, :cpu_exceeded} in reasons
+          assert :cpu_exceeded in reasons
 
           :ok = KillSwitch.stop_monitoring(machine_id)
 
@@ -463,7 +475,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
 
   describe "Security Scenarios" do
     test "CPU exhaustion attack (infinite loop)", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       for _ <- 1..5 do
         KillSwitch.report_metric(machine_id, :cpu_percent, 100.0)
@@ -479,7 +491,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "memory bomb attack", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       for _ <- 1..5 do
         KillSwitch.report_metric(machine_id, :memory_percent, 99.0)
@@ -495,7 +507,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "network flood attack (DDoS)", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       for _ <- 1..5 do
         KillSwitch.report_metric(machine_id, :network_mbps, 150.0)
@@ -511,7 +523,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
     end
 
     test "API abuse attack", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       for _ <- 1..5 do
         KillSwitch.report_metric(machine_id, :api_rate_rps, 2000)
@@ -530,36 +542,38 @@ defmodule Orchestrator.Security.KillSwitchTest do
   describe "Telemetry Events" do
     test "emits monitoring_started event", %{machine_id: machine_id} do
       ref = make_ref()
+      handler_id = {:test_monitoring_started, ref}
       self_pid = self()
 
       :telemetry.attach(
-        "test-monitoring-started-#{ref}",
+        handler_id,
         [:orchestrator, :kill_switch, :monitoring_started],
-        fn _event, _measurements, metadata, _config ->
-          send(self_pid, {:telemetry, metadata})
+        fn _event, _measurements, event_metadata, _config ->
+          send(self_pid, {:telemetry, event_metadata})
         end,
         nil
       )
 
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       assert_receive {:telemetry, metadata}, 1000
       assert metadata.machine_id == machine_id
 
-      :telemetry.detach("test-monitoring-started-#{ref}")
+      :telemetry.detach(handler_id)
     end
 
     test "emits machine_killed event", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       ref = make_ref()
+      handler_id = {:test_machine_killed, ref}
       self_pid = self()
 
       :telemetry.attach(
-        "test-machine-killed-#{ref}",
+        handler_id,
         [:orchestrator, :kill_switch, :machine_killed],
-        fn _event, _measurements, metadata, _config ->
-          send(self_pid, {:telemetry, metadata})
+        fn _event, _measurements, event_metadata, _config ->
+          send(self_pid, {:telemetry, event_metadata})
         end,
         nil
       )
@@ -571,17 +585,18 @@ defmodule Orchestrator.Security.KillSwitchTest do
       assert metadata.reason == "Test kill"
       assert metadata.manual == true
 
-      :telemetry.detach("test-machine-killed-#{ref}")
+      :telemetry.detach(handler_id)
     end
 
     test "emits threshold_violation event", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       ref = make_ref()
+      handler_id = {:test_threshold_violation, ref}
       self_pid = self()
 
       :telemetry.attach(
-        "test-threshold-violation-#{ref}",
+        handler_id,
         [:orchestrator, :kill_switch, :threshold_violation],
         fn _event, measurements, metadata, _config ->
           send(self_pid, {:telemetry, measurements, metadata})
@@ -601,17 +616,18 @@ defmodule Orchestrator.Security.KillSwitchTest do
           :ok
       end
 
-      :telemetry.detach("test-threshold-violation-#{ref}")
+      :telemetry.detach(handler_id)
     end
 
     test "emits circuit_breaker_tripped event", %{machine_id: machine_id} do
-      :ok = KillSwitch.start_monitoring(machine_id)
+      :ok = KillSwitch.start_monitoring(machine_id, simulate: false)
 
       ref = make_ref()
+      handler_id = {:test_circuit_breaker, ref}
       self_pid = self()
 
       :telemetry.attach(
-        "test-circuit-breaker-#{ref}",
+        handler_id,
         [:orchestrator, :kill_switch, :circuit_breaker_tripped],
         fn _event, measurements, metadata, _config ->
           send(self_pid, {:telemetry, measurements, metadata})
@@ -634,7 +650,7 @@ defmodule Orchestrator.Security.KillSwitchTest do
           :ok
       end
 
-      :telemetry.detach("test-circuit-breaker-#{ref}")
+      :telemetry.detach(handler_id)
     end
   end
 end

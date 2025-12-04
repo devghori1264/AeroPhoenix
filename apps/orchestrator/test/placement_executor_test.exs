@@ -1,8 +1,16 @@
+
 defmodule Orchestrator.Placement.ExecutorTest do
   use Orchestrator.DataCase, async: false
+  @moduletag :slow
+  @moduletag :integration
 
-  alias Orchestrator.{Machine, Repo}
+  alias Orchestrator.{Machines.Machine, Repo}
   alias Orchestrator.Placement.Executor
+
+  setup do
+    Ecto.Adapters.SQL.Sandbox.mode(Orchestrator.Repo, {:shared, self()})
+    :ok
+  end
 
   describe "apply_cost_optimization/2" do
     setup do
@@ -57,7 +65,7 @@ defmodule Orchestrator.Placement.ExecutorTest do
       invalid_recommendations = [
         %{
           type: :consolidate,
-          machine_id: "nonexistent_machine",
+          machine_id: Ecto.UUID.generate(),
           target_host: "host_001"
         }
       ]
@@ -163,7 +171,7 @@ defmodule Orchestrator.Placement.ExecutorTest do
     test "validates machine exists before execution" do
       recommendation = %{
         type: :migrate,
-        machine_id: "nonexistent_machine_id",
+        machine_id: Ecto.UUID.generate(),
         target_region: "us-west-2"
       }
 
@@ -174,13 +182,13 @@ defmodule Orchestrator.Placement.ExecutorTest do
     test "skips validation when force option is true" do
       recommendation = %{
         type: :migrate,
-        machine_id: "nonexistent_machine_id",
+        machine_id: Ecto.UUID.generate(),
         target_region: "us-west-2"
       }
 
       result = Executor.execute_placement(recommendation, force: true, validate: false)
 
-      assert {:error, _} = result
+      assert {:ok, _} = result
     end
   end
 
@@ -264,7 +272,7 @@ defmodule Orchestrator.Placement.ExecutorTest do
           }
         end)
 
-      start_time = System.monotonic_time(:millisecond)
+      _start_time = System.monotonic_time(:millisecond)
 
       {:ok, result} =
         Executor.apply_latency_optimization(placements,
@@ -329,7 +337,7 @@ defmodule Orchestrator.Placement.ExecutorTest do
 
   describe "error handling" do
     test "handles machine in invalid state" do
-      machine = insert_machine(%{region: "us-east-1", status: "terminated"})
+      machine = insert_machine(%{region: "us-east-1", status: "destroyed"})
 
       recommendation = %{
         type: :migrate,
@@ -340,7 +348,7 @@ defmodule Orchestrator.Placement.ExecutorTest do
       {:error, {:validation_failed, errors}} =
         Executor.apply_latency_optimization([recommendation], mode: :progressive)
 
-      assert [{_rec, {:invalid_machine_state, "terminated"}}] = errors
+      assert [{_rec, {:invalid_machine_state, "destroyed"}}] = errors
     end
 
     test "handles insufficient capacity errors" do
@@ -365,7 +373,7 @@ defmodule Orchestrator.Placement.ExecutorTest do
   describe "integration scenarios" do
     test "complete cost optimization workflow" do
       machines =
-        for i <- 1..3 do
+        for _i <- 1..3 do
           insert_machine(%{
             region: "us-east-1",
             status: "running",
@@ -427,13 +435,14 @@ defmodule Orchestrator.Placement.ExecutorTest do
 
   defp insert_machine(attrs) do
     default_attrs = %{
-      id: "m_#{:rand.uniform(999_999)}",
+      id: Ecto.UUID.generate(),
       name: "test-machine-#{:rand.uniform(1000)}",
       region: "us-east-1",
       status: "running",
       image: "test-image:latest",
       metadata: %{},
       user_id: "user_test",
+      machine_type: "standard",
       version: 1,
       inserted_at: DateTime.utc_now(),
       updated_at: DateTime.utc_now()

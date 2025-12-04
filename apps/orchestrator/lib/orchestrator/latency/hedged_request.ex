@@ -67,8 +67,8 @@ defmodule Orchestrator.Latency.HedgedRequest do
         end)
 
       case Task.yield(primary_task, hedge_delay_ms) do
-        {:ok, result} ->
-          Logger.debug("Primary request completed",
+        {:ok, {:ok, _} = result} ->
+          Logger.debug("Primary request completed successfully",
             request_id: request_id,
             target: inspect(primary_target),
             duration_ms: hedge_delay_ms
@@ -76,40 +76,72 @@ defmodule Orchestrator.Latency.HedgedRequest do
 
           result
 
+        {:ok, {:error, _} = error} ->
+          Logger.debug("Primary request failed immediately, firing hedge",
+            request_id: request_id,
+            target: inspect(primary_target),
+            error: error
+          )
+          fire_hedges_and_wait(
+            request_id,
+            primary_task,
+            selected_targets,
+            operation,
+            timeout_ms,
+            enable_cancellation
+          )
+
         nil ->
-          hedge_targets = Enum.drop(selected_targets, 1)
-
-          hedge_tasks =
-            Enum.with_index(hedge_targets, 1)
-            |> Enum.map(fn {target, index} ->
-              Task.async(fn ->
-                execute_request(request_id, target, operation, {:hedge, index})
-              end)
-            end)
-
-          all_tasks = [primary_task | hedge_tasks]
-          remaining_timeout = timeout_ms - hedge_delay_ms
-
-          case wait_for_first_success(all_tasks, remaining_timeout) do
-            {:ok, result, winning_task} ->
-              if enable_cancellation do
-                cancel_tasks(all_tasks -- [winning_task], request_id)
-              end
-
-              hedge_won = winning_task != primary_task
-
-              Logger.info("Hedged request completed",
-                request_id: request_id,
-                hedge_won: hedge_won,
-                total_targets: length(all_tasks)
-              )
-
-              result
-
-            {:error, _reason} = error ->
-              error
-          end
+          fire_hedges_and_wait(
+            request_id,
+            primary_task,
+            selected_targets,
+            operation,
+            timeout_ms - hedge_delay_ms,
+            enable_cancellation
+          )
       end
+    end
+  end
+
+  defp fire_hedges_and_wait(
+         request_id,
+         primary_task,
+         selected_targets,
+         operation,
+         remaining_timeout,
+         enable_cancellation
+       ) do
+    hedge_targets = Enum.drop(selected_targets, 1)
+
+    hedge_tasks =
+      Enum.with_index(hedge_targets, 1)
+      |> Enum.map(fn {target, index} ->
+        Task.async(fn ->
+          execute_request(request_id, target, operation, {:hedge, index})
+        end)
+      end)
+
+    all_tasks = [primary_task | hedge_tasks]
+
+    case wait_for_first_success(all_tasks, remaining_timeout) do
+      {:ok, result, winning_task} ->
+        if enable_cancellation do
+          cancel_tasks(all_tasks -- [winning_task], request_id)
+        end
+
+        hedge_won = winning_task != primary_task
+
+        Logger.info("Hedged request completed",
+          request_id: request_id,
+          hedge_won: hedge_won,
+          total_targets: length(all_tasks)
+        )
+
+        result
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -136,23 +168,50 @@ defmodule Orchestrator.Latency.HedgedRequest do
   end
 
   defp wait_for_first_success(tasks, timeout_ms) do
-    results = Task.yield_many(tasks, timeout_ms)
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    poll_for_success(tasks, deadline, [])
+  end
 
-    case Enum.find(results, fn {_task, result} ->
-           match?({:ok, {:ok, _}}, result)
-         end) do
-      {winning_task, {:ok, {:ok, value}}} ->
-        {:ok, {:ok, value}, winning_task}
+  defp poll_for_success([], _deadline, errors) do
+    {:error, {:all_requests_failed, errors}}
+  end
 
-      nil ->
-        errors =
-          Enum.map(results, fn
-            {_task, {:ok, {:error, reason}}} -> reason
-            {_task, nil} -> :timeout
-            {_task, {:exit, reason}} -> {:exit, reason}
-          end)
+  defp poll_for_success(tasks, deadline, errors) do
+    now = System.monotonic_time(:millisecond)
 
-        {:error, {:all_requests_failed, errors}}
+    if now >= deadline do
+      {:error, {:all_requests_failed, [:timeout | errors]}}
+    else
+      poll_interval = min(10, deadline - now)
+      results = Task.yield_many(tasks, poll_interval)
+
+      success = Enum.find(results, fn {_task, result} ->
+        match?({:ok, {:ok, _}}, result)
+      end)
+
+      case success do
+        {winning_task, {:ok, {:ok, value}}} ->
+          {:ok, {:ok, value}, winning_task}
+
+        nil ->
+
+          {running_tasks, new_errors} =
+            Enum.reduce(results, {[], errors}, fn
+              {task, nil}, {acc_tasks, acc_errors} ->
+                {[task | acc_tasks], acc_errors}
+
+              {_task, {:ok, {:error, reason}}}, {acc_tasks, acc_errors} ->
+                {acc_tasks, [reason | acc_errors]}
+
+              {_task, {:exit, reason}}, {acc_tasks, acc_errors} ->
+                {acc_tasks, [{:exit, reason} | acc_errors]}
+
+              {_task, {:ok, _other}}, {acc_tasks, acc_errors} ->
+                 {acc_tasks, [:unexpected_result | acc_errors]}
+            end)
+
+          poll_for_success(Enum.reverse(running_tasks), deadline, new_errors)
+      end
     end
   end
 

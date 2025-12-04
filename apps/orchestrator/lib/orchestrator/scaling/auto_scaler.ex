@@ -4,7 +4,7 @@ defmodule Orchestrator.Scaling.AutoScaler do
   alias Orchestrator.Repo
   alias Orchestrator.Scaling.{ScalingPolicy, ScalingEvent}
   alias Orchestrator.Metrics.{MetricSample, MetricDefinition}
-  alias Orchestrator.Machines.Machine
+  alias Orchestrator.Machines
   import Ecto.Query
   @type scaling_decision :: :scale_out | :scale_in | :no_change
   @type strategy :: :predictive | :reactive | :scheduled
@@ -18,29 +18,30 @@ defmodule Orchestrator.Scaling.AutoScaler do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @spec create_policy(map()) :: {:ok, ScalingPolicy.t()} | {:error, term()}
-  def create_policy(attrs) do
-    GenServer.call(__MODULE__, {:create_policy, attrs})
+  @spec create_policy(GenServer.server(), map()) :: {:ok, ScalingPolicy.t()} | {:error, term()}
+  def create_policy(server \\ __MODULE__, attrs) do
+    GenServer.call(server, {:create_policy, attrs})
   end
 
-  @spec update_policy(binary(), map()) :: {:ok, ScalingPolicy.t()} | {:error, term()}
-  def update_policy(policy_id, attrs) do
-    GenServer.call(__MODULE__, {:update_policy, policy_id, attrs})
+  @spec update_policy(GenServer.server(), binary(), map()) :: {:ok, ScalingPolicy.t()} | {:error, term()}
+  def update_policy(server \\ __MODULE__, policy_id, attrs) do
+    GenServer.call(server, {:update_policy, policy_id, attrs})
   end
 
-  @spec evaluate_scaling(String.t()) :: :ok
-  def evaluate_scaling(service) do
-    GenServer.cast(__MODULE__, {:evaluate_scaling, service})
+  @spec evaluate_scaling(GenServer.server(), String.t()) :: map()
+  def evaluate_scaling(server \\ __MODULE__, service) do
+    GenServer.call(server, {:evaluate_scaling, service})
   end
 
-  @spec scale_now(String.t(), scaling_decision(), integer()) :: {:ok, map()} | {:error, term()}
-  def scale_now(service, action, count) do
-    GenServer.call(__MODULE__, {:scale_now, service, action, count})
+  @spec scale_now(GenServer.server(), String.t(), scaling_decision(), integer()) ::
+          {:ok, map()} | {:error, term()}
+  def scale_now(server \\ __MODULE__, service, action, count) do
+    GenServer.call(server, {:scale_now, service, action, count})
   end
 
-  @spec get_current_metrics(String.t()) :: {:ok, map()} | {:error, term()}
-  def get_current_metrics(service) do
-    GenServer.call(__MODULE__, {:get_current_metrics, service})
+  @spec get_current_metrics(GenServer.server(), String.t()) :: {:ok, map()} | {:error, term()}
+  def get_current_metrics(server \\ __MODULE__, service) do
+    GenServer.call(server, {:get_current_metrics, service})
   end
 
   @spec get_scaling_history(String.t(), keyword()) :: list(ScalingEvent.t())
@@ -49,9 +50,9 @@ defmodule Orchestrator.Scaling.AutoScaler do
     ScalingEvent.for_service(service, hours)
   end
 
-  @spec get_stats() :: map()
-  def get_stats do
-    GenServer.call(__MODULE__, :get_stats)
+  @spec get_stats(GenServer.server()) :: map()
+  def get_stats(server \\ __MODULE__) do
+    GenServer.call(server, :get_stats)
   end
 
   @impl true
@@ -82,6 +83,11 @@ defmodule Orchestrator.Scaling.AutoScaler do
   end
 
   @impl true
+  def terminate(reason, _state) do
+    Logger.error("AutoScaler terminating: #{inspect(reason)}")
+  end
+
+  @impl true
   def handle_call({:create_policy, attrs}, _from, state) do
     case ScalingPolicy.create(attrs) do
       {:ok, policy} ->
@@ -106,13 +112,26 @@ defmodule Orchestrator.Scaling.AutoScaler do
 
   @impl true
   def handle_call({:scale_now, service, action, count}, _from, state) do
-    case execute_scaling(service, action, count, :manual) do
-      {:ok, result} ->
-        state = update_scaling_stats(state, action)
-        {:reply, {:ok, result}, state}
+    policy = ScalingPolicy.get_by_service(service)
+    last_scale = Map.get(state.last_scale_time, service)
+    cooldown_seconds = if policy, do: get_cooldown_seconds(action, policy), else: 0
 
-      error ->
-        {:reply, error, state}
+    if can_scale?(last_scale, cooldown_seconds) do
+      case execute_scaling(service, action, count, :manual) do
+        {:ok, result} ->
+          state =
+            state
+            |> put_in([Access.key!(:last_scale_time), service], DateTime.utc_now())
+            |> update_scaling_stats(action)
+
+          {:reply, {:ok, result}, state}
+
+        error ->
+          {:reply, error, state}
+      end
+    else
+      state = update_in(state.stats.prevented_by_cooldown, &(&1 + 1))
+      {:reply, {:ok, %{action: :prevented_by_cooldown}}, state}
     end
   end
 
@@ -128,9 +147,10 @@ defmodule Orchestrator.Scaling.AutoScaler do
   end
 
   @impl true
-  def handle_cast({:evaluate_scaling, service}, state) do
-    state = evaluate_service_scaling(service, state)
-    {:noreply, state}
+  def handle_call({:evaluate_scaling, service}, _from, state) do
+    {decision, state} = evaluate_service_scaling(service, state)
+    result = decision_to_map(decision)
+    {:reply, result, state}
   end
 
   @impl true
@@ -145,7 +165,8 @@ defmodule Orchestrator.Scaling.AutoScaler do
     state = update_in(state.stats.evaluations, &(&1 + 1))
 
     Enum.reduce(policies, state, fn policy, acc_state ->
-      evaluate_service_scaling(policy.service, acc_state)
+      {_decision, new_state} = evaluate_service_scaling(policy.service, acc_state)
+      new_state
     end)
   end
 
@@ -166,17 +187,23 @@ defmodule Orchestrator.Scaling.AutoScaler do
 
       case decision do
         {:scale_out, count, reason} ->
-          execute_with_cooldown(service, :scale_out, count, reason, policy, state)
+          new_state = execute_with_cooldown(service, :scale_out, count, reason, policy, state)
+          {decision, new_state}
 
         {:scale_in, count, reason} ->
-          execute_with_cooldown(service, :scale_in, count, reason, policy, state)
+          new_state = execute_with_cooldown(service, :scale_in, count, reason, policy, state)
+          {decision, new_state}
 
         {:no_change, _, _reason} ->
-          state
+          {decision, state}
       end
     else
-      state
+      {{:no_change, 0, "Policy disabled or not found"}, state}
     end
+  end
+
+  defp decision_to_map({action, count, reason}) do
+    %{action: action, count: count, reason: reason}
   end
 
   defp predictive_scaling_decision(service, policy, current_metrics, state) do
@@ -415,19 +442,19 @@ defmodule Orchestrator.Scaling.AutoScaler do
     elapsed >= cooldown_seconds
   end
 
-  defp get_cooldown_seconds(:scale_out, policy), do: policy.scale_out_cooldown
-  defp get_cooldown_seconds(:scale_in, policy), do: policy.scale_in_cooldown
+  defp get_cooldown_seconds(:scale_out, policy), do: policy.scale_out_cooldown_seconds
+  defp get_cooldown_seconds(:scale_in, policy), do: policy.scale_in_cooldown_seconds
 
   defp execute_scaling(service, :scale_out, count, reason) do
     Logger.info("SCALING OUT: #{service} +#{count} instances - #{reason}")
-    current_machines = Machine.list_by_service(Orchestrator.Repo, service, state: "running")
+    current_machines = Machines.Machine.list_by_service(Orchestrator.Repo, service, status: "running")
     current_count = length(current_machines)
 
     results =
       Enum.map(1..count, fn _i ->
-        Machine.create(%{
+        Machines.Machine.create(%{
           service: service,
-          state: "provisioning",
+          status: "provisioning",
           region: select_optimal_region(service),
           instance_type: select_instance_type(service),
           created_by: "autoscaler"
@@ -456,7 +483,7 @@ defmodule Orchestrator.Scaling.AutoScaler do
 
   defp execute_scaling(service, :scale_in, count, reason) do
     Logger.info("SCALING IN: #{service} -#{count} instances - #{reason}")
-    current_machines = Machine.list_by_service(Orchestrator.Repo, service, state: "running")
+    current_machines = Machines.Machine.list_by_service(Orchestrator.Repo, service, status: "running")
     current_count = length(current_machines)
 
     machines_to_remove =
@@ -465,7 +492,7 @@ defmodule Orchestrator.Scaling.AutoScaler do
       |> Enum.take(count)
 
     Enum.each(machines_to_remove, fn machine ->
-      Machine.update(machine, %{state: "terminating"})
+      Machines.Machine.update(machine, %{status: "terminating"})
     end)
 
     removed = length(machines_to_remove)
@@ -489,7 +516,7 @@ defmodule Orchestrator.Scaling.AutoScaler do
   end
 
   defp collect_current_metrics(service) do
-    machines = Machine.list_by_service(service, state: "running")
+    machines = Machines.Machine.list_by_service(Orchestrator.Repo, service, status: "running")
     current_count = length(machines)
 
     if current_count > 0 do
@@ -549,7 +576,7 @@ defmodule Orchestrator.Scaling.AutoScaler do
     if cpu_def && memory_def do
       query = """
       SELECT
-        time_bucket('1 hour', timestamp) as hour,
+        date_trunc('hour', timestamp) as hour,
         AVG(CASE WHEN metric_id = $1 THEN value END) as cpu_percent,
         AVG(CASE WHEN metric_id = $2 THEN value END) as memory_percent
       FROM metric_samples

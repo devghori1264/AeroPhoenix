@@ -65,10 +65,10 @@ defmodule Orchestrator.Recovery.RepairActions do
         {:ok, outcome}
 
       {:error, reason} ->
-        Logger.error("Repair failed",
+        Logger.info("Repair failed",
           anomaly_type: anomaly.type,
           machine_id: anomaly.machine_id,
-          reason: inspect(reason),
+          error: inspect(reason),
           duration_ms: duration_ms,
           pre_state: inspect(pre_state),
           post_state: inspect(post_state)
@@ -152,6 +152,8 @@ defmodule Orchestrator.Recovery.RepairActions do
             pid: inspect(pid)
           )
 
+          Orchestrator.ResourceManager.release_resources(machine_id)
+
           {:ok, :repaired}
       end
     end
@@ -213,53 +215,82 @@ defmodule Orchestrator.Recovery.RepairActions do
   end
 
   defp resurrect_machine(machine_id, anomaly) do
-    region = extract_region_from_db(machine_id) || "recovered"
-
-    case MachineSupervisor.start_machine(id: machine_id, region: region) do
+    case MachineSupervisor.restart_machine(machine_id) do
       {:ok, pid} ->
-        Logger.info("Zombie resurrected successfully",
+        Logger.info("Zombie resurrected successfully from metadata",
           machine_id: machine_id,
           pid: inspect(pid)
         )
+        verify_resurrection(machine_id, pid, anomaly)
 
-        Process.sleep(100)
+      {:error, :no_persisted_state} ->
+        Logger.warning("Zombie resurrection missing metadata, using fallback", machine_id: machine_id)
+        fallback_resurrect(machine_id, anomaly)
 
-        if Process.alive?(pid) do
-          case GenServer.call(pid, :get_state, 5000) do
-            state when is_atom(state) ->
-              Logger.info("Zombie state recovered",
-                machine_id: machine_id,
-                recovered_state: state,
-                db_state: anomaly.db_state
-              )
+      {:error, reason} ->
+        Logger.info("Zombie resurrection failed",
+          machine_id: machine_id,
+          reason: inspect(reason)
+        )
+        {:error, reason}
+    end
+  end
 
-              {:ok, :repaired}
+  defp fallback_resurrect(machine_id, anomaly) do
+    region = extract_region_from_db(machine_id) || "recovered"
 
-            _ ->
-              {:ok, :repaired}
-          end
-        else
-          Logger.error("Zombie resurrection failed - process died immediately",
-            machine_id: machine_id
-          )
+    case MachineSupervisor.start_machine(id: machine_id, region: region) do
+      {:error, :insufficient_cpu, _details} ->
+        Logger.info("Zombie resurrection failed - insufficient CPU", machine_id: machine_id)
+        {:error, :insufficient_resources}
 
-          {:error, :immediate_crash}
-        end
+      {:error, :insufficient_memory, _details} ->
+        Logger.info("Zombie resurrection failed - insufficient memory", machine_id: machine_id)
+        {:error, :insufficient_resources}
+
+      {:ok, pid} ->
+        Logger.info("Zombie resurrected successfully (fallback)",
+          machine_id: machine_id,
+          pid: inspect(pid)
+        )
+        verify_resurrection(machine_id, pid, anomaly)
 
       {:error, :already_exists} ->
         Logger.info("Zombie resurrection race - already started",
           machine_id: machine_id
         )
-
         {:ok, :already_healthy}
 
       {:error, reason} ->
-        Logger.error("Zombie resurrection failed",
+        Logger.info("Zombie resurrection failed",
           machine_id: machine_id,
           reason: inspect(reason)
         )
-
         {:error, reason}
+    end
+  end
+
+  defp verify_resurrection(machine_id, pid, anomaly) do
+    Process.sleep(100)
+
+    if Process.alive?(pid) do
+      case GenServer.call(pid, :get_state, 5000) do
+        state when is_atom(state) ->
+          Logger.info("Zombie state recovered",
+            machine_id: machine_id,
+            recovered_state: state,
+            db_state: anomaly.db_state
+          )
+          {:ok, :repaired}
+
+        _ ->
+          {:ok, :repaired}
+      end
+    else
+      Logger.info("Zombie resurrection failed - process died immediately",
+        machine_id: machine_id
+      )
+      {:error, :immediate_crash}
     end
   end
 
@@ -357,7 +388,7 @@ defmodule Orchestrator.Recovery.RepairActions do
 
   defp execute_with_retry_loop(anomaly, attempt, max_attempts, base_delay_ms, last_error) do
     if attempt > max_attempts do
-      Logger.error("Repair failed after all retries",
+      Logger.info("Repair failed after all retries",
         anomaly_type: anomaly.type,
         machine_id: anomaly.machine_id,
         attempts: max_attempts,
@@ -512,7 +543,7 @@ defmodule Orchestrator.Recovery.RepairActions do
 
   defp get_db_path(machine_id) do
     data_dir =
-      Application.get_env(:orchestrator, :machine_data_dir, "data/machines")
+      Application.get_env(:orchestrator, :storage_path, "data/machines")
 
     Path.join(data_dir, "#{machine_id}.db")
   end

@@ -2,7 +2,6 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
   use Ecto.Migration
 
   def up do
-    execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
     execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     execute("CREATE EXTENSION IF NOT EXISTS btree_gin")
 
@@ -111,34 +110,30 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     end
 
     execute("""
-    SELECT create_hypertable(
-      'metric_samples',
-      'timestamp',
-      chunk_time_interval => INTERVAL '1 hour',
-      if_not_exists => TRUE
-    )
-    """)
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable(
+          'metric_samples',
+          'timestamp',
+          chunk_time_interval => INTERVAL '1 hour',
+          if_not_exists => TRUE
+        );
 
-    create(index(:metric_samples, [:metric_id, :timestamp]))
-    create(index(:metric_samples, [:labels_hash]))
-    create(index(:metric_samples, [:machine_id]))
-    create(index(:metric_samples, [:region]))
-    execute("CREATE INDEX metric_samples_labels_gin ON metric_samples USING GIN (labels)")
+        PERFORM add_compression_policy(
+          'metric_samples',
+          INTERVAL '1 hour',
+          if_not_exists => TRUE
+        );
 
-    execute("""
-    SELECT add_compression_policy(
-      'metric_samples',
-      INTERVAL '1 hour',
-      if_not_exists => TRUE
-    )
-    """)
-
-    execute("""
-    SELECT add_retention_policy(
-      'metric_samples',
-      INTERVAL '90 days',
-      if_not_exists => TRUE
-    )
+        PERFORM add_retention_policy(
+          'metric_samples',
+          INTERVAL '90 days',
+          if_not_exists => TRUE
+        );
+      END IF;
+    END
+    $$;
     """)
 
     create table(:metric_aggregates, primary_key: false) do
@@ -166,35 +161,33 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     end
 
     execute("""
-    SELECT create_hypertable(
-      'metric_aggregates',
-      'timestamp',
-      chunk_time_interval => INTERVAL '1 day',
-      if_not_exists => TRUE
-    )
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable(
+          'metric_aggregates',
+          'timestamp',
+          chunk_time_interval => INTERVAL '1 day',
+          if_not_exists => TRUE
+        );
+
+        PERFORM add_compression_policy(
+          'metric_aggregates',
+          INTERVAL '1 day',
+          if_not_exists => TRUE
+        );
+
+        PERFORM add_retention_policy(
+          'metric_aggregates',
+          INTERVAL '365 days',
+          if_not_exists => TRUE
+        );
+      END IF;
+    END
+    $$;
     """)
 
-    create(index(:metric_aggregates, [:metric_id, :interval, :timestamp]))
-    create(index(:metric_aggregates, [:labels_hash]))
-    execute("CREATE INDEX metric_aggregates_labels_gin ON metric_aggregates USING GIN (labels)")
-
-    execute("""
-    SELECT add_compression_policy(
-      'metric_aggregates',
-      INTERVAL '1 day',
-      if_not_exists => TRUE
-    )
-    """)
-
-    execute("""
-    SELECT add_retention_policy(
-      'metric_aggregates',
-      INTERVAL '365 days',
-      if_not_exists => TRUE
-    )
-    """)
-
-    create table(:alert_rules) do
+    create table(:alert_rules, primary_key: false) do
       add(:id, :uuid, primary_key: true)
       add(:name, :string, null: false)
       add(:severity, :alert_severity, null: false)
@@ -224,7 +217,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     create(index(:alert_rules, [:metric_id]))
     create(index(:alert_rules, [:team]))
 
-    create table(:alert_instances) do
+    create table(:alert_instances, primary_key: false) do
       add(:id, :uuid, primary_key: true)
 
       add(:alert_rule_id, references(:alert_rules, type: :uuid, on_delete: :delete_all),
@@ -256,7 +249,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     create(index(:alert_instances, [:severity]))
     execute("CREATE INDEX alert_instances_labels_gin ON alert_instances USING GIN (labels)")
 
-    create table(:sla_definitions) do
+    create table(:sla_definitions, primary_key: false) do
       add(:id, :uuid, primary_key: true)
       add(:name, :string, null: false)
       add(:description, :text)
@@ -280,7 +273,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     create(index(:sla_definitions, [:status]))
     create(index(:sla_definitions, [:enabled]))
 
-    create table(:sla_violations) do
+    create table(:sla_violations, primary_key: false) do
       add(:id, :uuid, primary_key: true)
       add(:sla_id, references(:sla_definitions, type: :uuid, on_delete: :delete_all), null: false)
       add(:started_at, :utc_datetime_usec, null: false)
@@ -299,7 +292,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     create(index(:sla_violations, [:sla_id]))
     create(index(:sla_violations, [:started_at]))
 
-    create table(:dashboards) do
+    create table(:dashboards, primary_key: false) do
       add(:id, :uuid, primary_key: true)
       add(:name, :string, null: false)
       add(:description, :text)
@@ -319,7 +312,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     create(index(:dashboards, [:starred]))
     execute("CREATE INDEX dashboards_tags_gin ON dashboards USING GIN (tags)")
 
-    create table(:dashboard_panels) do
+    create table(:dashboard_panels, primary_key: false) do
       add(:id, :uuid, primary_key: true)
 
       add(:dashboard_id, references(:dashboards, type: :uuid, on_delete: :delete_all),
@@ -349,7 +342,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
 
     create(index(:dashboard_panels, [:dashboard_id]))
 
-    create table(:anomaly_models) do
+    create table(:anomaly_models, primary_key: false) do
       add(:id, :uuid, primary_key: true)
 
       add(:metric_id, references(:metric_definitions, type: :uuid, on_delete: :delete_all),
@@ -371,7 +364,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     create(unique_index(:anomaly_models, [:metric_id, :name]))
     create(index(:anomaly_models, [:enabled]))
 
-    create table(:anomalies) do
+    create table(:anomalies, primary_key: false) do
       add(:id, :uuid, primary_key: true)
 
       add(:model_id, references(:anomaly_models, type: :uuid, on_delete: :delete_all),
@@ -404,7 +397,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     create(index(:anomalies, [:severity]))
     create(index(:anomalies, [:is_false_positive]))
 
-    create table(:traces) do
+    create table(:traces, primary_key: false) do
       add(:id, :uuid, primary_key: true)
       add(:trace_id, :string, null: false, comment: "Distributed trace ID")
       add(:started_at, :utc_datetime_usec, null: false)
@@ -424,7 +417,7 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     create(index(:traces, [:status]))
     execute("CREATE INDEX traces_tags_gin ON traces USING GIN (tags)")
 
-    create table(:spans) do
+    create table(:spans, primary_key: false) do
       add(:id, :uuid, primary_key: true)
       add(:trace_id, references(:traces, type: :uuid, on_delete: :delete_all), null: false)
       add(:span_id, :string, null: false)
@@ -642,38 +635,44 @@ defmodule Orchestrator.Repo.Migrations.CreatePerformanceMetrics do
     """)
 
     execute("""
-    CREATE MATERIALIZED VIEW metric_aggregates_1m
-    WITH (timescaledb.continuous) AS
-    SELECT
-      metric_id,
-      time_bucket('1 minute', timestamp) AS timestamp,
-      '1m' as interval,
-      labels,
-      labels_hash,
-      AVG(value) as avg,
-      SUM(value) as sum,
-      MIN(value) as min,
-      MAX(value) as max,
-      COUNT(*) as count,
-      STDDEV(value) as stddev,
-      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY value) as p50,
-      PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY value) as p90,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) as p95,
-      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY value) as p99,
-      machine_id,
-      region
-    FROM metric_samples
-    GROUP BY metric_id, time_bucket('1 minute', timestamp), labels, labels_hash, machine_id, region
-    """)
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        EXECUTE '
+          CREATE MATERIALIZED VIEW metric_aggregates_1m
+          WITH (timescaledb.continuous) AS
+          SELECT
+            metric_id,
+            time_bucket(''1 minute'', timestamp) AS timestamp,
+            ''1m'' as interval,
+            labels,
+            labels_hash,
+            AVG(value) as avg,
+            SUM(value) as sum,
+            MIN(value) as min,
+            MAX(value) as max,
+            COUNT(*) as count,
+            STDDEV(value) as stddev,
+            PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY value) as p50,
+            PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY value) as p90,
+            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) as p95,
+            PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY value) as p99,
+            machine_id,
+            region
+          FROM metric_samples
+          GROUP BY metric_id, time_bucket(''1 minute'', timestamp), labels, labels_hash, machine_id, region
+        ';
 
-    execute("""
-    SELECT add_continuous_aggregate_policy(
-      'metric_aggregates_1m',
-      start_offset => INTERVAL '1 hour',
-      end_offset => INTERVAL '1 minute',
-      schedule_interval => INTERVAL '1 minute',
-      if_not_exists => TRUE
-    )
+        PERFORM add_continuous_aggregate_policy(
+          'metric_aggregates_1m',
+          start_offset => INTERVAL '1 hour',
+          end_offset => INTERVAL '1 minute',
+          schedule_interval => INTERVAL '1 minute',
+          if_not_exists => TRUE
+        );
+      END IF;
+    END
+    $$;
     """)
   end
 

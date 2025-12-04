@@ -20,7 +20,8 @@ defmodule Orchestrator.Metrics.Collector do
       [:orchestrator, :migration, :failed],
       [:orchestrator, :fsm, :transition],
       [:orchestrator, :crdt, :gossip_sent],
-      [:orchestrator, :holodeck, :machines_spawned]
+      [:orchestrator, :holodeck, :machines_spawned],
+      [:orchestrator, :holodeck, :started]
     ]
 
     :telemetry.attach_many(
@@ -146,7 +147,7 @@ defmodule Orchestrator.Metrics.Collector do
   def init(_opts) do
     :ets.new(:metrics_counters, [:named_table, :set, :public, read_concurrency: true])
     :ets.new(:metrics_gauges, [:named_table, :set, :public, read_concurrency: true])
-    :ets.new(:metrics_histograms, [:named_table, :bag, :public, read_concurrency: true])
+    :ets.new(:metrics_histograms, [:named_table, :set, :public, read_concurrency: true])
 
     Logger.info("Metrics Collector started")
 
@@ -183,7 +184,14 @@ defmodule Orchestrator.Metrics.Collector do
     end)
 
     sum_key = {key, :sum}
-    :ets.update_counter(:metrics_histograms, sum_key, {2, value}, {sum_key, 0.0})
+
+    case :ets.lookup(:metrics_histograms, sum_key) do
+      [{^sum_key, current_sum}] ->
+        :ets.insert(:metrics_histograms, {sum_key, current_sum + value})
+
+      [] ->
+        :ets.insert(:metrics_histograms, {sum_key, value})
+    end
 
     count_key = {key, :count}
     :ets.update_counter(:metrics_histograms, count_key, {2, 1}, {count_key, 0})
@@ -193,6 +201,37 @@ defmodule Orchestrator.Metrics.Collector do
 
   @impl true
   def handle_call(:get_metrics, _from, state) do
+    metrics = collect_metrics()
+    {:reply, metrics, state}
+  end
+
+  @impl true
+  def handle_call(:prometheus_format, _from, state) do
+    metrics = collect_metrics()
+
+    grouped = Enum.group_by(metrics, & &1.name)
+
+    output =
+      Enum.map(grouped, fn {name, metric_list} ->
+        type = hd(metric_list).type
+
+        help_line = "# HELP #{name} #{metric_help(name)}\n"
+        type_line = "# TYPE #{name} #{type}\n"
+
+        metric_lines =
+          Enum.map(metric_list, fn metric ->
+            format_metric_line(metric)
+          end)
+          |> Enum.join("")
+
+        help_line <> type_line <> metric_lines
+      end)
+      |> Enum.join("\n")
+
+    {:reply, output, state}
+  end
+
+  defp collect_metrics do
     counters =
       :ets.tab2list(:metrics_counters)
       |> Enum.map(fn {{name, labels}, value} ->
@@ -238,35 +277,7 @@ defmodule Orchestrator.Metrics.Collector do
         %{name: name, type: :histogram, labels: labels, buckets: buckets, sum: sum, count: count}
       end)
 
-    all_metrics = counters ++ gauges ++ histograms
-
-    {:reply, all_metrics, state}
-  end
-
-  @impl true
-  def handle_call(:prometheus_format, _from, state) do
-    metrics = get_metrics()
-
-    grouped = Enum.group_by(metrics, & &1.name)
-
-    output =
-      Enum.map(grouped, fn {name, metric_list} ->
-        type = hd(metric_list).type
-
-        help_line = "# HELP #{name} #{metric_help(name)}\n"
-        type_line = "# TYPE #{name} #{type}\n"
-
-        metric_lines =
-          Enum.map(metric_list, fn metric ->
-            format_metric_line(metric)
-          end)
-          |> Enum.join("")
-
-        help_line <> type_line <> metric_lines
-      end)
-      |> Enum.join("\n")
-
-    {:reply, output, state}
+    counters ++ gauges ++ histograms
   end
 
   defp metric_help(name) do
@@ -298,8 +309,12 @@ defmodule Orchestrator.Metrics.Collector do
          sum: sum,
          count: count
        }) do
+    bucket_map = Map.new(buckets)
+
     bucket_lines =
-      Enum.map(buckets, fn {bucket, value} ->
+      @histogram_buckets
+      |> Enum.map(fn bucket ->
+        value = Map.get(bucket_map, bucket, 0)
         le = if bucket == :infinity, do: "+Inf", else: bucket
         "#{name}_bucket#{format_labels(Map.put(labels, :le, le))} #{value}\n"
       end)

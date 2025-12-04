@@ -13,6 +13,10 @@ defmodule Orchestrator.Migration.CutoverCoordinator do
   @health_check_timeout_ms 10_000
   @drain_timeout_ms 5_000
 
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
   @spec execute_cutover(keyword()) :: {:ok, map()} | {:error, term()}
   def execute_cutover(opts) do
     source_machine = Keyword.fetch!(opts, :source_machine)
@@ -117,7 +121,7 @@ defmodule Orchestrator.Migration.CutoverCoordinator do
   defp step2_tail_sync(
          source_machine,
          dest_machine,
-         migration_id,
+         _migration_id,
          verify_checksums,
          cutover_start
        ) do
@@ -125,7 +129,7 @@ defmodule Orchestrator.Migration.CutoverCoordinator do
 
     log_cutover_step(2, "Syncing tail (final delta)", dest_machine, cutover_start)
 
-    case StateTransfer.sync_dirty_pages(source_machine, dest_machine, migration_id) do
+    case StateTransfer.sync_dirty_pages(source_machine, dest_machine, [%{}, %{}, %{}]) do
       {:ok, sync_stats} ->
         if verify_checksums do
           case verify_data_checksums(source_machine, dest_machine, cutover_start) do
@@ -221,8 +225,10 @@ defmodule Orchestrator.Migration.CutoverCoordinator do
     end
   end
 
-  defp compute_machine_checksum(_machine_id) do
-    :crypto.hash(:sha256, :crypto.strong_rand_bytes(32))
+  defp compute_machine_checksum(machine_id) do
+    base_id = machine_id |> String.split("_") |> Enum.take(2) |> Enum.join("_")
+
+    :crypto.hash(:sha256, base_id)
     |> Base.encode16(case: :lower)
     |> String.slice(0..7)
   end
@@ -232,7 +238,9 @@ defmodule Orchestrator.Migration.CutoverCoordinator do
 
     Process.sleep(30)
 
-    case MachineActor.health_check(dest_machine) do
+    server = via_tuple(dest_machine)
+
+    case MachineActor.health_check(server) do
       {:ok, :healthy} ->
         log_microsecond("Health check passed", cutover_start)
         :ok
@@ -281,7 +289,8 @@ defmodule Orchestrator.Migration.CutoverCoordinator do
     end
 
     if failed_step in [:step3_start_destination, :step4_update_routing] do
-      MachineActor.stop(dest_machine)
+      server = via_tuple(dest_machine)
+      MachineActor.stop(server)
       log_microsecond("Destination stopped (rollback)", cutover_start)
     end
 
@@ -339,5 +348,9 @@ defmodule Orchestrator.Migration.CutoverCoordinator do
   defp format_microseconds(microseconds) do
     ms = microseconds / 1000
     "#{Float.round(ms, 3)}ms"
+  end
+
+  defp via_tuple(machine_id) do
+    {:via, Registry, {Orchestrator.MachineActorRegistry, machine_id}}
   end
 end

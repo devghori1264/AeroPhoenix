@@ -3,7 +3,6 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
 
   def up do
     execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-    execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
     create_resource_type_enum()
     create_aggregation_level_enum()
     create_optimization_status_enum()
@@ -524,27 +523,26 @@ defmodule Orchestrator.Repo.Migrations.CreateCostAnalytics do
 
   defp enable_timescaledb_hypertables do
     execute("""
-    SELECT create_hypertable(
-      'resource_usage',
-      'measured_at',
-      chunk_time_interval => INTERVAL '1 day',
-      if_not_exists => TRUE
-    )
-    """)
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable(
+          'resource_usage',
+          'measured_at',
+          chunk_time_interval => INTERVAL '1 day',
+          if_not_exists => TRUE
+        );
 
-    execute("""
-    ALTER TABLE resource_usage SET (
-      timescaledb.compress,
-      timescaledb.compress_segmentby = 'machine_id,region'
-    )
-    """)
+        ALTER TABLE resource_usage SET (
+          timescaledb.compress,
+          timescaledb.compress_segmentby = 'machine_id,region'
+        );
 
-    execute("""
-    SELECT add_compression_policy('resource_usage', INTERVAL '7 days')
-    """)
-
-    execute("""
-    SELECT add_retention_policy('resource_usage', INTERVAL '90 days')
+        PERFORM add_compression_policy('resource_usage', INTERVAL '7 days');
+        PERFORM add_retention_policy('resource_usage', INTERVAL '90 days');
+      END IF;
+    END
+    $$;
     """)
   end
 end

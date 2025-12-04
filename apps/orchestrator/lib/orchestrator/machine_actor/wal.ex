@@ -48,16 +48,30 @@ defmodule Orchestrator.MachineActor.WAL do
     end
   end
 
-  @spec mark_completed(Exqlite.Conn.t(), String.t()) :: :ok | {:error, term()}
-  def mark_completed(conn, operation_id) do
-    sql = """
-    UPDATE wal_entries
-    SET status = 'completed',
-        completed_at = ?
-    WHERE operation_id = ?
-    """
-
-    params = [DateTime.to_iso8601(DateTime.utc_now()), operation_id]
+  @spec mark_completed(Exqlite.Conn.t(), String.t(), atom() | nil) :: :ok | {:error, term()}
+  def mark_completed(conn, operation_id, final_state \\ nil) do
+    {sql, params} =
+      if final_state do
+        {"""
+         UPDATE wal_entries
+         SET status = 'completed',
+             completed_at = ?,
+             to_state = ?
+         WHERE operation_id = ?
+         """,
+         [
+           DateTime.to_iso8601(DateTime.utc_now()),
+           Atom.to_string(final_state),
+           operation_id
+         ]}
+      else
+        {"""
+         UPDATE wal_entries
+         SET status = 'completed',
+             completed_at = ?
+         WHERE operation_id = ?
+         """, [DateTime.to_iso8601(DateTime.utc_now()), operation_id]}
+      end
 
     case Orchestrator.MachineActor.Storage.execute(conn, sql, params) do
       {:ok, _} -> :ok
@@ -158,7 +172,7 @@ defmodule Orchestrator.MachineActor.WAL do
 
     case Orchestrator.MachineActor.Storage.execute(conn, sql) do
       {:ok, rows} when rows == [] ->
-        {:ok, %{completed: [], rolled_back: [], conflicts: []}}
+        {:ok, %{completed: [], rolled_back: [], conflicts: [], final_state: current_state}}
 
       {:ok, rows} ->
         now = DateTime.utc_now()
@@ -191,8 +205,8 @@ defmodule Orchestrator.MachineActor.WAL do
 
         completed =
           results
-          |> Enum.filter(&match?({:complete, _}, &1))
-          |> Enum.map(fn {:complete, op_id} -> op_id end)
+          |> Enum.filter(&match?({:complete, _, _}, &1))
+          |> Enum.map(fn {:complete, op_id, _} -> op_id end)
 
         rolled_back =
           results
@@ -204,17 +218,25 @@ defmodule Orchestrator.MachineActor.WAL do
           |> Enum.filter(&match?({:conflict, _}, &1))
           |> Enum.map(fn {:conflict, op_id} -> op_id end)
 
+        final_state =
+          Enum.reduce(results, current_state, fn
+            {:complete, _op_id, to_state}, _acc -> to_state
+            _, acc -> acc
+          end)
+
         Logger.info("Uncommitted intent replay complete",
           completed: length(completed),
           rolled_back: length(rolled_back),
-          conflicts: length(conflicts)
+          conflicts: length(conflicts),
+          final_state: final_state
         )
 
         {:ok,
          %{
            completed: completed,
            rolled_back: rolled_back,
-           conflicts: conflicts
+           conflicts: conflicts,
+           final_state: final_state
          }}
 
       {:error, reason} ->
@@ -223,7 +245,7 @@ defmodule Orchestrator.MachineActor.WAL do
   end
 
   @spec decide_recovery_action(Exqlite.Conn.t(), map(), atom()) ::
-          {:complete, String.t()}
+          {:complete, String.t(), atom()}
           | {:rollback, String.t(), atom()}
           | {:conflict, String.t()}
   defp decide_recovery_action(conn, intent, current_state) do
@@ -235,7 +257,7 @@ defmodule Orchestrator.MachineActor.WAL do
         )
 
         mark_completed(conn, intent.operation_id)
-        {:complete, intent.operation_id}
+        {:complete, intent.operation_id, intent.to_state}
 
       current_state == intent.to_state ->
         Logger.info("Intent already completed (state matches)",
@@ -244,7 +266,7 @@ defmodule Orchestrator.MachineActor.WAL do
         )
 
         mark_completed(conn, intent.operation_id)
-        {:complete, intent.operation_id}
+        {:complete, intent.operation_id, intent.to_state}
 
       current_state == intent.from_state ->
         Logger.info("Completing safe intent",
@@ -254,7 +276,7 @@ defmodule Orchestrator.MachineActor.WAL do
         )
 
         mark_completed(conn, intent.operation_id)
-        {:complete, intent.operation_id}
+        {:complete, intent.operation_id, intent.to_state}
 
       intent.age_seconds > 60 ->
         Logger.warning("Rolling back abandoned intent",
@@ -267,7 +289,7 @@ defmodule Orchestrator.MachineActor.WAL do
 
       intent.transition_type == :migrate ->
         case recover_migration_intent(conn, intent) do
-          :completed -> {:complete, intent.operation_id}
+          :completed -> {:complete, intent.operation_id, intent.to_state}
           :rolled_back -> {:rollback, intent.operation_id, :migration_failed}
         end
 
@@ -413,7 +435,27 @@ defmodule Orchestrator.MachineActor.WAL do
   end
 
   defp parse_datetime(iso8601_string) when is_binary(iso8601_string) do
-    {:ok, dt, _} = DateTime.from_iso8601(iso8601_string)
-    dt
+    case DateTime.from_iso8601(iso8601_string) do
+      {:ok, dt, _} ->
+        dt
+
+      {:error, :missing_offset} ->
+        case DateTime.from_iso8601(iso8601_string <> "Z") do
+          {:ok, dt, _} ->
+            dt
+
+          {:error, _} ->
+            case NaiveDateTime.from_iso8601(iso8601_string) do
+              {:ok, ndt} ->
+                DateTime.from_naive!(ndt, "Etc/UTC")
+
+              {:error, reason} ->
+                raise "Failed to parse datetime: #{iso8601_string}, reason: #{inspect(reason)}"
+            end
+        end
+
+      {:error, reason} ->
+        raise "Failed to parse datetime: #{iso8601_string}, reason: #{inspect(reason)}"
+    end
   end
 end

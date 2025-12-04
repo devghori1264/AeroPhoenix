@@ -7,14 +7,31 @@ defmodule Orchestrator.MachineActorTest do
   @moduletag :capture_log
 
   setup do
-    data_dir = "test/data/machines"
-    File.rm_rf!(data_dir)
+    start_supervised!(Orchestrator.FlydSim)
+    data_dir = "tmp/test_machines"
     File.mkdir_p!(data_dir)
 
     Application.put_env(:orchestrator, :machine_actor_data_dir, data_dir)
 
     on_exit(fn ->
-      File.rm_rf!(data_dir)
+      Supervisor.list_machines()
+      |> Enum.each(fn id -> 
+        try do
+          Supervisor.stop_machine(id)
+        rescue
+          _ -> :ok
+        end
+      end)
+      Enum.reduce_while(1..5, :error, fn _, _ ->
+        try do
+          File.rm_rf!(data_dir)
+          {:halt, :ok}
+        rescue
+          _ -> 
+            Process.sleep(100)
+            {:cont, :error}
+        end
+      end)
     end)
 
     {:ok, data_dir: data_dir}
@@ -34,7 +51,7 @@ defmodule Orchestrator.MachineActorTest do
 
       assert Process.alive?(pid)
 
-      {:ok, state} = MachineActor.get_state(pid)
+      {:ok, state} = MachineActor.get_snapshot(pid)
       assert state.id == machine_id
       assert state.state == :created
       assert state.region == "us-east-1"
@@ -57,7 +74,7 @@ defmodule Orchestrator.MachineActorTest do
 
       Process.sleep(200)
 
-      {:ok, state_before} = MachineActor.get_state(pid)
+      {:ok, state_before} = MachineActor.get_snapshot(pid)
       assert state_before.state == :running
 
       Process.exit(pid, :kill)
@@ -65,7 +82,7 @@ defmodule Orchestrator.MachineActorTest do
 
       {:ok, new_pid} = Supervisor.restart_machine(machine_id)
 
-      {:ok, state_after} = MachineActor.get_state(new_pid)
+      {:ok, state_after} = MachineActor.get_snapshot(new_pid)
       assert state_after.id == machine_id
       assert state_after.state == :running
       assert state_after.region == "eu-west-1"
@@ -112,7 +129,7 @@ defmodule Orchestrator.MachineActorTest do
       {:ok, pid: pid, machine_id: machine_id}
     end
 
-    test "validates legal transitions", %{pid: pid} do
+    test "validates legal transitions", %{pid: _pid} do
       assert FSM.validate_transition(:created, :starting) == :ok
 
       assert {:error, {:invalid_transition, :created, :running}} =
@@ -131,7 +148,7 @@ defmodule Orchestrator.MachineActorTest do
 
       Process.sleep(200)
 
-      {:ok, state} = MachineActor.get_state(pid)
+      {:ok, state} = MachineActor.get_snapshot(pid)
       assert state.state == :running
     end
 
@@ -145,10 +162,10 @@ defmodule Orchestrator.MachineActorTest do
     test "enforces operation lock (no concurrent transitions)", %{pid: pid} do
       task1 = Task.async(fn -> MachineActor.transition(pid, :start) end)
 
-      Process.sleep(10)
+      wait_for_lock(pid)
 
       {:error, {:locked_by_operation, _op_id}} =
-        MachineActor.transition(pid, :stop)
+        MachineActor.transition(pid, :start)
 
       {:ok, _result} = Task.await(task1)
     end
@@ -177,7 +194,7 @@ defmodule Orchestrator.MachineActorTest do
   end
 
   describe "Write-Ahead Log" do
-    test "records all transitions", %{data_dir: data_dir} do
+    test "records all transitions", %{data_dir: _data_dir} do
       machine_id = "m_wal_test_#{:rand.uniform(10000)}"
 
       {:ok, pid} =
@@ -257,7 +274,7 @@ defmodule Orchestrator.MachineActorTest do
 
       {:ok, pid} = Supervisor.start_machine(id: machine_id, region: "us-east-1")
 
-      {:ok, state} = MachineActor.get_state(pid)
+      {:ok, state} = MachineActor.get_snapshot(pid)
       assert state.state == :running
 
       :ok = Supervisor.stop_machine(machine_id)
@@ -319,7 +336,7 @@ defmodule Orchestrator.MachineActorTest do
         Process.sleep(100)
       end)
 
-      {:ok, state} = MachineActor.get_state(pid)
+      {:ok, state} = MachineActor.get_snapshot(pid)
 
       assert state.stats.transitions == 10
       assert state.stats.avg_transition_ms > 0.0
@@ -361,6 +378,21 @@ defmodule Orchestrator.MachineActorTest do
       :ok = Supervisor.stop_machine(machine_id)
 
       assert Supervisor.count_machines() == initial_count
+    end
+  end
+
+  defp wait_for_lock(pid, attempts \\ 50) do
+    case MachineActor.get_snapshot(pid) do
+      {:ok, %{locked_by: locked}} when not is_nil(locked) ->
+        :ok
+
+      _ ->
+        if attempts > 0 do
+          Process.sleep(10)
+          wait_for_lock(pid, attempts - 1)
+        else
+          flunk("Failed to acquire lock")
+        end
     end
   end
 end

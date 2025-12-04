@@ -1,14 +1,33 @@
 defmodule Orchestrator.ManagerTest do
-  use ExUnit.Case, async: false
-  alias Orchestrator.{Repo, Manager, Machine}
+  use Orchestrator.DataCase, async: false
+  alias Orchestrator.{Repo, Manager, Machines.Machine}
 
-  setup_all do
+  setup do
     :ok
   end
 
   test "create machine persists and calls remote" do
-    {:ok, machine} = Manager.create_machine("web", "eu")
+    bypass = Bypass.open(port: 8081)
+
+    Bypass.expect(bypass, "POST", "/create", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      {:ok, params} = Jason.decode(body)
+
+      response = %{
+        "id" => "remote-machine-id-#{:rand.uniform(1000)}",
+        "status" => "running",
+        "name" => params["name"],
+        "region" => params["region"]
+      }
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, Jason.encode!(response))
+    end)
+
+    {:ok, machine} = Manager.create_machine("web", "eu-west-1", "standard")
     assert machine.name == "web"
+    assert machine.machine_type == "standard"
     assert machine.status in ["pending", "running"]
     m = Repo.get(Machine, machine.id)
     assert is_map(m.metadata)
