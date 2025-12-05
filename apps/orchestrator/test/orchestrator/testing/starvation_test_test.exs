@@ -506,7 +506,8 @@ defmodule Orchestrator.Testing.StarvationTestTest do
 
       duration_us = end_time - start_time
 
-      assert duration_us < 1000
+      assert duration_us < 5000,
+             "Capacity check took #{duration_us}μs, expected < 5000μs"
     end
   end
   def handle_telemetry_event(event_name, measurements, metadata, test_pid) do

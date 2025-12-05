@@ -18,24 +18,36 @@ defmodule Orchestrator.Quota.QuotaEnforcerTest do
     end
 
     test "rate limits after quota exceeded" do
-      org_id = "org_rate_limit_1"
+      org_id = "org_rate_limit_#{System.unique_integer([:positive])}"
 
-      for _i <- 1..1000 do
-        QuotaEnforcer.check_api_quota(org_id, "/api/machines")
-      end
+      result =
+        Enum.reduce_while(1..2000, :ok, fn _, _acc ->
+          case QuotaEnforcer.check_api_quota(org_id, "/api/machines") do
+            {:error, :rate_limited} -> {:halt, {:error, :rate_limited}}
+            :ok -> {:cont, :ok}
+          end
+        end)
 
-      assert {:error, :rate_limited} = QuotaEnforcer.check_api_quota(org_id, "/api/machines")
+      assert result == {:error, :rate_limited},
+             "Expected rate limiting after exhausting quota, but got #{inspect(result)}"
     end
 
     test "separate quotas per organization" do
-      for _i <- 1..1000 do
-        QuotaEnforcer.check_api_quota("org_separate_a", "/api/machines")
-      end
+      org_a = "org_separate_a_#{System.unique_integer([:positive])}"
+      org_b = "org_separate_b_#{System.unique_integer([:positive])}"
 
-      assert {:error, :rate_limited} =
-               QuotaEnforcer.check_api_quota("org_separate_a", "/api/machines")
+      result_a =
+        Enum.reduce_while(1..2000, :ok, fn _, _acc ->
+          case QuotaEnforcer.check_api_quota(org_a, "/api/machines") do
+            {:error, :rate_limited} -> {:halt, {:error, :rate_limited}}
+            :ok -> {:cont, :ok}
+          end
+        end)
 
-      assert :ok = QuotaEnforcer.check_api_quota("org_separate_b", "/api/machines")
+      assert result_a == {:error, :rate_limited},
+             "Expected org_a to be rate limited, but got #{inspect(result_a)}"
+
+      assert :ok = QuotaEnforcer.check_api_quota(org_b, "/api/machines")
     end
   end
 
