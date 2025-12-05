@@ -278,8 +278,20 @@ defmodule Orchestrator.MachineActor.Storage do
           :ok
         end
 
+      {:ok, []} ->
+        Logger.info("Schema version table empty, inserting version #{@schema_version}")
+        insert_schema_version(conn)
+
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp insert_schema_version(conn) do
+    sql = "INSERT INTO schema_version (version, applied_at) VALUES (#{@schema_version}, '#{DateTime.to_iso8601(DateTime.utc_now())}')"
+    case exec_sql(conn, sql) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

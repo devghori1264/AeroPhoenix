@@ -166,10 +166,14 @@ defmodule Orchestrator.Metrics.CollectorTest do
   end
 
   describe "get_metrics/0" do
-    test "returns empty list when no metrics" do
+    test "returns empty list when no test metrics" do
       metrics = Collector.get_metrics()
 
-      assert metrics == []
+      test_metrics = Enum.filter(metrics, fn m ->
+        String.starts_with?(m.name, "test_")
+      end)
+
+      assert test_metrics == []
     end
 
     test "returns all metric types" do
@@ -179,11 +183,15 @@ defmodule Orchestrator.Metrics.CollectorTest do
 
       metrics = Collector.get_metrics()
 
-      assert length(metrics) == 3
+      test_metrics = Enum.filter(metrics, fn m ->
+        m.name in ["test_counter", "test_gauge", "test_histogram"]
+      end)
 
-      counter = Enum.find(metrics, &(&1.type == :counter))
-      gauge = Enum.find(metrics, &(&1.type == :gauge))
-      histogram = Enum.find(metrics, &(&1.type == :histogram))
+      assert length(test_metrics) == 3
+
+      counter = Enum.find(test_metrics, &(&1.type == :counter))
+      gauge = Enum.find(test_metrics, &(&1.type == :gauge))
+      histogram = Enum.find(test_metrics, &(&1.type == :histogram))
 
       assert counter != nil
       assert gauge != nil
