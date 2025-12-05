@@ -31,4 +31,4 @@ apps/phoenix_ui/priv/static/cache_manifest.json
 /apps/flyd-sim/bin/*
 .vscode
 *.aegis.bak
-aegis_final.py
+aegis_final.pyapps/orchestrator/bin/flyd-sim

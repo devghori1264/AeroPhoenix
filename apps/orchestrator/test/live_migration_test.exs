@@ -339,6 +339,7 @@ defmodule Orchestrator.LiveMigrationTest do
       machine = insert_machine()
       _machine_id = machine.id
 
+      Code.ensure_loaded(Cutover)
       assert function_exported?(Cutover, :perform_cutover, 4)
     end
   end

@@ -210,8 +210,7 @@ defmodule Orchestrator.Recovery.DriftDetector do
           end
         end)
 
-      {:ok, []} ->
-        []
+
 
       {:error, :enoent} ->
         []
@@ -322,75 +321,11 @@ defmodule Orchestrator.Recovery.DriftDetector do
     end
   end
 
-  defp get_database_machines do
-    data_dir = Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
 
-    case File.ls(data_dir) do
-      {:ok, files} ->
-        files
-        |> Enum.filter(&String.ends_with?(&1, ".db"))
-        |> Enum.map(fn filename ->
-          machine_id = String.replace_suffix(filename, ".db", "")
-          db_path = Path.join(data_dir, filename)
 
-          case get_db_state(machine_id) do
-            {:ok, state} ->
-              %{
-                machine_id: machine_id,
-                db_path: db_path,
-                state: state
-              }
 
-            {:error, _reason} ->
-              %{
-                machine_id: machine_id,
-                db_path: db_path,
-                state: :unknown
-              }
-          end
-        end)
 
-      {:error, :enoent} ->
-        []
 
-      {:error, reason} ->
-        Logger.error("Failed to scan machine data directory",
-          reason: inspect(reason)
-        )
-
-        []
-    end
-  end
-
-  defp get_db_state(machine_id) do
-    db_path = get_db_path(machine_id)
-
-    case Storage.init(db_path) do
-      {:ok, conn} ->
-        try do
-          case Storage.load_metadata(conn) do
-            {:ok, meta} ->
-              {:ok, meta.state}
-
-            {:error, :not_found} ->
-              {:ok, :created}
-
-            {:error, reason} ->
-              {:error, reason}
-          end
-        after
-          Storage.close(conn)
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp get_db_path(machine_id) do
-    data_dir = Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
-    Path.join(data_dir, "#{machine_id}.db")
-  end
 
   defp get_process_state(pid, timeout) do
     try do

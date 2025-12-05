@@ -237,8 +237,17 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
                    end, 10_000)
 
           if success do
+          success = wait_for_condition(fn ->
+            state = get_machine_state(machine_id)
+            state != nil and state.state in [:running, :stopped]
+          end, 5000)
+
+          if success do
             state = get_machine_state(machine_id)
             assert state.state in [:running, :stopped]
+          else
+             flunk("Machine state did not stabilize to :running or :stopped. Current state: #{inspect(get_machine_state(machine_id))}")
+          end
           end
 
         _ ->
