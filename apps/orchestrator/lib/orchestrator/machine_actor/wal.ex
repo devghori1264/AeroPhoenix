@@ -26,7 +26,7 @@ defmodule Orchestrator.MachineActor.WAL do
       Atom.to_string(entry.from_state),
       Atom.to_string(entry.to_state),
       Atom.to_string(entry.transition_type),
-      Jason.encode!(entry.opts),
+      Jason.encode!(Enum.into(entry.opts, %{})),
       DateTime.to_iso8601(entry.timestamp),
       "pending"
     ]

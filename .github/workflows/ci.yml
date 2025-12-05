@@ -66,6 +66,26 @@ jobs:
           ulimit -n 65535
           sudo sysctl -w fs.file-max=65535
 
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25'
+
+      - name: Start flyd-sim
+        run: |
+          cd apps/flyd-sim
+          go run . &
+          sleep 5 # Give it a moment to start
+
+      - name: Create and Migrate Database
+        env:
+          DATABASE_URL: "ecto://aerouser:aeropass@localhost:5432/aerophoenix_test"
+          MIX_ENV: test
+        run: |
+          cd apps/orchestrator
+          mix ecto.create
+          mix ecto.migrate
+
       - name: Run Elixir tests
         env:
           DATABASE_URL: "ecto://aerouser:aeropass@localhost:5432/aerophoenix_test"
