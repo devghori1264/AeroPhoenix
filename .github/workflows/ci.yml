@@ -169,9 +169,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build flyd-sim image
         run: |
-          docker build -f apps/flyd-sim/Dockerfile -t ghcr.io/${{ github.repository }}/flyd-sim:latest apps/flyd-sim
-          docker push ghcr.io/${{ github.repository }}/flyd-sim:latest
+          docker build -f apps/flyd-sim/Dockerfile -t ghcr.io/${{ github.repository_owner }}/aerophoenix/flyd-sim:latest apps/flyd-sim
+          docker push ghcr.io/${{ github.repository_owner }}/aerophoenix/flyd-sim:latest
       - name: Build net-sim image
         run: |
-          docker build -f apps/net-sim/Dockerfile -t ghcr.io/${{ github.repository }}/net-sim:latest apps/net-sim
-          docker push ghcr.io/${{ github.repository }}/net-sim:latest
+          docker build -f apps/net-sim/Dockerfile -t ghcr.io/${{ github.repository_owner }}/aerophoenix/net-sim:latest apps/net-sim
+          docker push ghcr.io/${{ github.repository_owner }}/aerophoenix/net-sim:latest
