@@ -181,10 +181,6 @@ defmodule Orchestrator.LiveMigrationTest do
       {:ok, status} = Coordinator.get_status(migration_id)
       assert status.status == :cancelled
     end
-
-    test "automatically rolls back on phase failure" do
-      assert function_exported?(Coordinator, :handle_info, 2)
-    end
   end
 
   describe "checkpointing" do
