@@ -75,13 +75,34 @@ jobs:
         run: |
           mkdir -p apps/orchestrator/bin
           cd apps/flyd-sim
-          go build -o ../orchestrator/bin/flyd-sim .
+          # Build the correct entry point with HTTP server (port 8080) + gRPC (port 50051)
+          go build -o ../orchestrator/bin/flyd-sim ./cmd/server
+
+      - name: Prepare Test Environment
+        run: |
+          # Create required directories with proper permissions
+          mkdir -p apps/orchestrator/tmp/test_machines
+          mkdir -p apps/orchestrator/data/machines
+          mkdir -p apps/orchestrator/data/badger
+          chmod -R 777 apps/orchestrator/tmp
+          chmod -R 777 apps/orchestrator/data
 
       - name: Start flyd-sim
         run: |
-          cd apps/orchestrator/bin
-          ./flyd-sim &
-          sleep 5 # Give it a moment to start
+          cd apps/orchestrator
+          # Start flyd-sim with explicit paths to avoid permission issues
+          ./bin/flyd-sim --db ./data/badger --nats "" &
+          # Wait for HTTP server to be ready (port 8080)
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/ping > /dev/null 2>&1; then
+              echo "flyd-sim HTTP server is ready"
+              break
+            fi
+            echo "Waiting for flyd-sim... ($i/30)"
+            sleep 1
+          done
+          # Verify the server is actually responding
+          curl -sf http://localhost:8080/ping || (echo "flyd-sim failed to start" && exit 1)
 
       - name: Create and Migrate Database
         env:

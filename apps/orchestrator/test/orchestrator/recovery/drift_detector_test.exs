@@ -283,7 +283,7 @@ defmodule Orchestrator.Recovery.DriftDetectorTest do
       Process.sleep(50)
       move_db_to_test_dir(id, data_dir)
 
-      assert {:ok, :healthy} = wait_for_machine_check(id, {:ok, :healthy}, 10, data_dir)
+      assert {:ok, :healthy} = wait_for_machine_check(id, {:ok, :healthy}, data_dir, 10)
 
       MachActorSup.stop_machine(id)
     end
@@ -626,7 +626,7 @@ defmodule Orchestrator.Recovery.DriftDetectorTest do
     end
   end
 
-  defp wait_for_machine_check(id, expected_result, retries \\ 10, data_dir) do
+  defp wait_for_machine_check(id, expected_result, data_dir, retries) do
     case DriftDetector.check_machine(id, data_dir: data_dir) do
       ^expected_result ->
         expected_result
@@ -634,7 +634,7 @@ defmodule Orchestrator.Recovery.DriftDetectorTest do
       _result ->
         if retries > 0 do
           Process.sleep(100)
-          wait_for_machine_check(id, expected_result, retries - 1, data_dir)
+          wait_for_machine_check(id, expected_result, data_dir, retries - 1)
         else
           expected_result
         end

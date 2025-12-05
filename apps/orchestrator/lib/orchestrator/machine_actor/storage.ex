@@ -15,6 +15,10 @@ defmodule Orchestrator.MachineActor.Storage do
 
   @spec init(String.t()) :: {:ok, conn()} | {:error, term()}
   def init(db_path) do
+    db_path
+    |> Path.dirname()
+    |> File.mkdir_p()
+
     do_init_with_retry(db_path, 5)
   end
 
@@ -48,7 +52,7 @@ defmodule Orchestrator.MachineActor.Storage do
             Logger.error("Schema initialization failed: #{inspect(reason)}")
             Exqlite.Sqlite3.close(conn)
             if retries_left > 0 do
-              Process.sleep(100 * (6 - retries_left)) 
+              Process.sleep(100 * (6 - retries_left))
               do_init_with_retry(db_path, retries_left - 1)
             else
               {:error, reason}
@@ -58,7 +62,7 @@ defmodule Orchestrator.MachineActor.Storage do
       {:error, reason} ->
         Logger.error("Failed to open SQLite database: #{inspect(reason)}")
         if retries_left > 0 do
-          Process.sleep(200 * (6 - retries_left)) 
+          Process.sleep(200 * (6 - retries_left))
           do_init_with_retry(db_path, retries_left - 1)
         else
           {:error, reason}
@@ -332,7 +336,7 @@ defmodule Orchestrator.MachineActor.Storage do
                :done <- Exqlite.Sqlite3.step(conn, stmt) do
             {:ok, []}
           else
-            {:row, _} -> {:ok, []} 
+            {:row, _} -> {:ok, []}
             error -> error
           end
 

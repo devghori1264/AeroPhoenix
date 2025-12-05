@@ -24,15 +24,20 @@ end
 
 File.rm_rf!("tmp/test_machines")
 File.mkdir_p!("tmp/test_machines")
+File.mkdir_p!("data/machines")
+File.mkdir_p!("data/badger")
+
 Application.put_env(:orchestrator, :storage_path, "tmp/test_machines/")
+Application.put_env(:orchestrator, :machine_actor_data_dir, "tmp/test_machines")
+Application.put_env(:orchestrator, :machine_data_dir, "tmp/test_machines")
 
 is_ci = System.get_env("CI") == "true"
 cores = System.schedulers_online()
 
 max_cases = if is_ci do
-  min(cores * 2, 4) 
+  min(cores * 2, 4)
 else
-  8 
+  8
 end
 
 IO.puts """
@@ -47,11 +52,11 @@ IO.puts """
 ExUnit.start(
   max_cases: max_cases,
   timeout: 120_000,
-  assert_receive_timeout: 1_000 
+  assert_receive_timeout: 1_000
 )
 
-Application.put_env(:orchestrator, Orchestrator.Repo, 
-  pool_size: max_cases + 5, 
+Application.put_env(:orchestrator, Orchestrator.Repo,
+  pool_size: max_cases + 5,
   ownership_timeout: 120_000
 )
 
