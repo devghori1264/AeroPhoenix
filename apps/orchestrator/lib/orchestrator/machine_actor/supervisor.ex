@@ -132,7 +132,7 @@ defmodule Orchestrator.MachineActor.Supervisor do
     end
   end
 
-  @spec stop_machine(String.t()) :: :ok | {:error, :not_found}
+  @spec stop_machine(String.t()) :: :ok
   def stop_machine(id) do
     case find_machine(id) do
       {:ok, pid} ->
@@ -162,7 +162,8 @@ defmodule Orchestrator.MachineActor.Supervisor do
         :ok
 
       {:error, :not_found} ->
-        {:error, :not_found}
+        # Machine already stopped/gone - treat as success (idempotent)
+        :ok
     end
   end
 
