@@ -159,39 +159,48 @@ const TopologyHook = {
   },
 
   addZoomControls(zoom) {
-    if (this.el.querySelector('.topology-zoom-controls')) return;
+
+    const existingControls = this.el.querySelector('.topology-zoom-controls');
+    if (existingControls) {
+      existingControls.remove();
+    }
 
     const controls = document.createElement('div');
-    controls.className = 'topology-zoom-controls glass';
+    controls.className = 'topology-zoom-controls';
     controls.innerHTML = `
       <button class="zoom-btn" data-action="zoom-in" title="Zoom In">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
       </button>
       <button class="zoom-btn" data-action="zoom-out" title="Zoom Out">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
       </button>
+      <span class="zoom-divider"></span>
       <button class="zoom-btn" data-action="zoom-reset" title="Reset View">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="2" fill="none"/>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <rect x="2" y="2" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <circle cx="7" cy="7" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
         </svg>
       </button>
     `;
 
     this.el.appendChild(controls);
 
-    controls.querySelector('[data-action="zoom-in"]').addEventListener('click', () => {
+    controls.querySelector('[data-action="zoom-in"]').addEventListener('click', (e) => {
+      e.stopPropagation();
       this.svg.transition().duration(300).call(zoom.scaleBy, 1.3);
     });
 
-    controls.querySelector('[data-action="zoom-out"]').addEventListener('click', () => {
+    controls.querySelector('[data-action="zoom-out"]').addEventListener('click', (e) => {
+      e.stopPropagation();
       this.svg.transition().duration(300).call(zoom.scaleBy, 0.7);
     });
 
-    controls.querySelector('[data-action="zoom-reset"]').addEventListener('click', () => {
+    controls.querySelector('[data-action="zoom-reset"]').addEventListener('click', (e) => {
+      e.stopPropagation();
       this.svg.transition().duration(500).call(
         zoom.transform,
         d3.zoomIdentity
@@ -287,8 +296,13 @@ const TopologyHook = {
       console.warn('[TopologyHook] No regions to render!');
       return;
     }
-    const width = this.svg.node()?.clientWidth || 1200;
-    const height = this.svg.node()?.clientHeight || 600;
+    
+    const svgNode = this.svg.node();
+    const parentNode = this.el;
+    const width = svgNode?.clientWidth || parentNode?.clientWidth || 1200;
+    const height = svgNode?.clientHeight || parentNode?.clientHeight || 600;
+    
+    console.log(`[TopologyHook] Container dimensions: ${width}x${height}`);
 
     const layout = this.computeLayout(machines, regions, width, height);
 

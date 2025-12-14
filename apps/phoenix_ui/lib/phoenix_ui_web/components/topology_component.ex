@@ -13,9 +13,14 @@ defmodule PhoenixUiWeb.TopologyComponent do
       data-topology={
         Jason.encode!(%{regions: @regions, machines: @machines, active_chaos: @active_chaos})
       }
-      class="w-full h-full min-h-[600px] bg-slate-950/50 rounded-xl border border-white/5 relative overflow-hidden group isolate"
+      class="topology-container"
+      style="position: relative; width: 100%; height: 600px; background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; border: 1px solid rgba(255, 255, 255, 0.05);"
     >
-      <svg id="topology-svg" class="w-full h-full cursor-move relative z-10">
+      <svg
+        id="topology-svg"
+        style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: move;"
+        preserveAspectRatio="xMidYMid meet"
+      >
         <defs>
           <filter id="glow-cyan" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="4" result="coloredBlur" />
@@ -27,6 +32,18 @@ defmodule PhoenixUiWeb.TopologyComponent do
 
           <filter id="glow-violet" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="4" result="coloredBlur" />
+            <feMerge>
+              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+
+          <filter id="topology-shadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3" />
+          </filter>
+
+          <filter id="topology-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="coloredBlur" />
             <feMerge>
               <feMergeNode in="coloredBlur" />
               <feMergeNode in="SourceGraphic" />
@@ -46,7 +63,7 @@ defmodule PhoenixUiWeb.TopologyComponent do
         <g id="layer-labels"></g>
       </svg>
 
-      <div class="absolute top-6 left-6 pointer-events-none">
+      <div class="absolute top-6 left-6 pointer-events-none z-20">
         <div class="space-y-2">
           <%= for region <- @regions do %>
             <div class="flex items-center gap-2 animate-fade-in-up">
@@ -62,8 +79,8 @@ defmodule PhoenixUiWeb.TopologyComponent do
       </div>
 
       <%= if length(@active_chaos) > 0 do %>
-        <div class="absolute top-0 left-0 w-full h-1 bg-rose-500 animate-pulse"></div>
-        <div class="absolute top-6 right-6 pointer-events-none">
+        <div class="absolute top-0 left-0 w-full h-1 bg-rose-500 animate-pulse z-20"></div>
+        <div class="absolute top-6 right-6 pointer-events-none z-20">
           <div class="px-3 py-1.5 rounded bg-rose-500/10 border border-rose-500/30 backdrop-blur flex items-center gap-2 animate-pulse">
             <.icon name="hero-exclamation-triangle" class="w-4 h-4 text-rose-500" />
             <span class="text-xs font-bold text-rose-400 tracking-wider">

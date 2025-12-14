@@ -3,7 +3,6 @@
   phx-hook="MicroInteractions"
   id="micro-interactions"
 >
-  <!-- Error Banner (if any) -->
   <%= if @error do %>
     <div class="fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] max-w-2xl w-full mx-4">
       <div class="bg-red-500/10 border border-red-500/50 rounded-lg p-4 backdrop-blur-xl shadow-2xl">
@@ -41,29 +40,24 @@
       </div>
     </div>
   <% end %>
-  
-<!-- Cinematic Background Elements -->
+
   <div class="fixed inset-0 pointer-events-none z-0">
     <div class="absolute inset-0 bg-[url('/images/grid.svg')] opacity-[0.03]"></div>
     <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent opacity-50">
     </div>
-    
-<!-- Animated Orbs -->
+
     <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-violet-900/10 blur-[100px] animate-float">
     </div>
     <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-900/10 blur-[100px] animate-float animation-delay-2000">
     </div>
   </div>
-  
-<!-- Scanline Overlay -->
+
   <div class="fixed inset-0 pointer-events-none z-50 opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]">
   </div>
 
   <div class="relative z-10 flex flex-col h-screen">
-    <!-- Top HUD Bar (System Vitals) -->
     <header class="h-16 glass-panel border-b border-white/5 flex items-center justify-between px-6 shrink-0 z-40">
       <div class="flex items-center gap-6">
-        <!-- Brand -->
         <div class="flex items-center gap-3 group cursor-pointer">
           <div class="relative w-10 h-10 flex items-center justify-center">
             <div class="absolute inset-0 bg-cyan-500/20 rounded-lg blur-sm group-hover:bg-cyan-500/30 transition-all">
@@ -95,8 +89,7 @@
             </div>
           </div>
         </div>
-        
-<!-- Global Metrics Ticker -->
+
         <div class="hidden lg:flex items-center gap-1 ml-8 border-l border-slate-200 dark:border-white/10 pl-8 transition-colors duration-300">
           <div class="flex flex-col items-center justify-center text-center px-4 border-r border-slate-200 dark:border-white/5 transition-colors duration-300">
             <span class="text-[10px] uppercase text-slate-500 tracking-wider">Global TPS</span>
@@ -131,8 +124,7 @@
           </div>
         </div>
       </div>
-      
-<!-- Right Controls -->
+
       <div class="flex items-center gap-4" phx-hook="ThemeSystem" id="theme-system">
         <button
           phx-click="refresh"
@@ -146,13 +138,11 @@
           <span class="text-xs font-mono text-rose-400">LIVE CONNECTION</span>
         </div>
         
-<!-- Theme Switcher -->
         <PhoenixUiWeb.Layouts.theme_toggle />
       </div>
     </header>
 
     <div class="flex flex-1 overflow-hidden">
-      <!-- Side Dock Navigation -->
       <nav class="w-20 glass-panel border-r border-white/5 flex flex-col items-center py-6 gap-4 z-30 shrink-0">
         <%= for tab <- @tabs do %>
           <button
@@ -161,7 +151,6 @@
             class="group relative w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-300"
             title={tab.name}
           >
-            <!-- Active Indicator -->
             <%= if @active_tab == tab.id do %>
               <div class="absolute inset-0 bg-gradient-to-br from-#{tab.color}-500/20 to-transparent rounded-xl border border-#{tab.color}-500/50 shadow-[0_0_15px_rgba(var(--color-#{tab.color}),0.3)]">
               </div>
@@ -169,7 +158,6 @@
               </div>
             <% end %>
             
-<!-- Icon -->
             <div class={[
               "relative z-10 transition-transform duration-300 group-hover:scale-110",
               if(@active_tab == tab.id,
@@ -179,8 +167,6 @@
             ]}>
               <.icon name={tab.icon} class="w-6 h-6" />
             </div>
-            
-<!-- Tooltip -->
             <div class="absolute left-14 px-3 py-1.5 rounded-md bg-slate-900 border border-white/10 text-xs font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
               {tab.name}
             </div>
@@ -188,12 +174,9 @@
         <% end %>
       </nav>
       
-<!-- Main Content Area -->
       <main class="flex-1 overflow-y-auto overflow-x-hidden relative scroll-smooth">
-        <!-- Content Container -->
         <div class="p-6 lg:p-8 max-w-[1920px] mx-auto min-h-full">
           
-<!-- Page Header -->
           <div class="mb-8 flex items-end justify-between animate-fade-in-up">
             <div>
               <h2 class="text-3xl font-bold text-white mb-2 flex items-center gap-3">
@@ -232,7 +215,6 @@
               </p>
             </div>
             
-<!-- Context Actions -->
             <div class="flex items-center gap-3">
               <%= if @active_tab == "overview" do %>
                 <button class="px-4 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 transition-all flex items-center gap-2 text-sm font-medium">
@@ -243,15 +225,14 @@
             </div>
           </div>
           
-<!-- Tab Content -->
           <div class="animate-fade-in-up animation-delay-200">
             <%= case @active_tab do %>
               <% "overview" -> %>
                 <div class="grid grid-cols-12 gap-6">
-                  <!-- Main Topology Map (Spans 8 cols) -->
+
                   <div class="col-span-12 lg:col-span-8 space-y-6">
-                    <div class="hud-card min-h-[600px] relative group">
-                      <div class="absolute top-0 right-0 p-4 z-10 flex gap-2">
+                    <div class="topology-wrapper relative group" style="min-height: 600px; background: var(--bg-panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border-radius: 0.75rem; padding: 0;">
+                      <div class="absolute top-4 left-4 z-30 flex gap-2">
                         <div class="px-2 py-1 rounded bg-black/50 border border-white/10 text-[10px] text-cyan-400 font-mono">
                           LIVE MAP
                         </div>
@@ -266,7 +247,6 @@
                     <PhoenixUiWeb.CreateMachineForm.render regions={@regions} />
                   </div>
                   
-<!-- Right Sidebar (Spans 4 cols) -->
                   <div class="col-span-12 lg:col-span-4 space-y-6">
                     <PhoenixUiWeb.MachineCardEnhanced.render machine={@selected} />
 
@@ -328,7 +308,7 @@
                   total_connections={@total_connections}
                 />
               <% "topology" -> %>
-                <div class="hud-card h-[80vh]">
+                <div class="topology-wrapper" style="height: 80vh; background: var(--bg-panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border-radius: 0.75rem; padding: 0;">
                   <PhoenixUiWeb.TopologyComponent.render
                     regions={@regions}
                     machines={@machines}
@@ -437,7 +417,6 @@
       </main>
     </div>
     
-<!-- Toast Container (Fixed Position) -->
     <ul
       id="toast-container"
       phx-hook="ToastHook"
@@ -457,7 +436,6 @@
       <% end %>
     </ul>
     
-<!-- Chaos Modal -->
     <%= if @chaos_modal_open do %>
       <div
         class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
@@ -467,7 +445,7 @@
           phx-click="modal-content-click"
           class="glass-panel w-full max-w-lg rounded-2xl border border-rose-500/30 shadow-[0_0_50px_rgba(244,63,94,0.2)] animate-fade-in-up overflow-hidden"
         >
-          <!-- Modal Header -->
+
           <div class="bg-rose-500/10 border-b border-rose-500/20 p-6 flex items-center justify-between">
             <div class="flex items-center gap-3">
               <div class="p-2 rounded-lg bg-rose-500/20 text-rose-400">
@@ -487,8 +465,7 @@
               <.icon name="hero-x-mark" class="w-6 h-6" />
             </button>
           </div>
-          
-<!-- Modal Body -->
+
           <div class="p-6">
             <form phx-submit="submit-chaos" class="space-y-6">
               <div class="space-y-2">

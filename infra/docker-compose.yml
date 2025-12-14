@@ -112,9 +112,9 @@ services:
     volumes:
       - flyd_eu_west_1_data:/data
     ports:
-      - "50052:50051"
-      - "8081:8080"
-      - "9091:9090"
+      - "50052:50052"
+      - "8081:8081"
+      - "9091:9091"
     depends_on:
       - postgres
       - nats
@@ -140,9 +140,9 @@ services:
     volumes:
       - flyd_ap_south_1_data:/data
     ports:
-      - "50053:50051"
-      - "8082:8080"
-      - "9095:9090"
+      - "50053:50053"
+      - "8082:8082"
+      - "9095:9092"
     depends_on:
       - postgres
       - nats
@@ -168,9 +168,9 @@ services:
     volumes:
       - flyd_us_west_2_data:/data
     ports:
-      - "50054:50051"
-      - "8083:8080"
-      - "9094:9090"
+      - "50054:50054"
+      - "8083:8083"
+      - "9094:9093"
     depends_on:
       - postgres
       - nats

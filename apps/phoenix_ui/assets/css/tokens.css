@@ -290,11 +290,110 @@
 .status-dot-pending { background: var(--c-indigo-500); }
 .status-dot-terminated { background: var(--c-rose-500); }
 
+.topology-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 600px;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.topology-container svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.topology-wrapper {
+  position: relative;
+  background: var(--bg-panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border-radius: 0.75rem;
+  padding: 0;
+}
+
+.topology-zoom-controls {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 40;
+  display: flex;
+  flex-direction: row;
+  gap: 0.125rem;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 0.5rem;
+  padding: 0.375rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="light"] .topology-zoom-controls,
+.light .topology-zoom-controls {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.topology-zoom-controls .zoom-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  color: rgba(148, 163, 184, 1);
+  transition: all 0.15s ease;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.topology-zoom-controls .zoom-btn:hover {
+  background: rgba(6, 182, 212, 0.15);
+  color: rgba(6, 182, 212, 1);
+}
+
+.topology-zoom-controls .zoom-btn:active {
+  transform: scale(0.95);
+  background: rgba(6, 182, 212, 0.25);
+}
+
+[data-theme="light"] .topology-zoom-controls .zoom-btn,
+.light .topology-zoom-controls .zoom-btn {
+  color: rgba(71, 85, 105, 1);
+}
+
+[data-theme="light"] .topology-zoom-controls .zoom-btn:hover,
+.light .topology-zoom-controls .zoom-btn:hover {
+  background: rgba(6, 182, 212, 0.1);
+  color: rgba(6, 182, 212, 1);
+}
+
+.topology-zoom-controls .zoom-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: auto 0.25rem;
+}
+
+[data-theme="light"] .topology-zoom-controls .zoom-divider,
+.light .topology-zoom-controls .zoom-divider {
+  background: rgba(0, 0, 0, 0.1);
+}
+
 .topology-root {
   background: var(--surface);
   color: var(--text);
   border-radius: 1rem;
-  overflow: hidden;
 }
 
 .topology-node circle {

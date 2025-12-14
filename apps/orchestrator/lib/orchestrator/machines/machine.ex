@@ -9,23 +9,25 @@ defmodule Orchestrator.Machines.Machine do
   @timestamps_opts [type: :utc_datetime_usec]
 
   @derive {Jason.Encoder,
-           only: [
-             :id,
-             :name,
-             :region,
-             :status,
-             :machine_type,
-             :cpu_count,
-             :memory_mb,
-             :service,
-             :config,
-             :tags,
-             :version,
-             :metadata,
-             :last_seen_at,
-             :inserted_at,
-             :updated_at
-           ]}
+            only: [
+              :id,
+              :name,
+              :region,
+              :status,
+              :machine_type,
+              :cpu,
+              :cpu_count,
+              :memory_mb,
+              :latency_ms,
+              :service,
+              :config,
+              :tags,
+              :version,
+              :metadata,
+              :last_seen_at,
+              :inserted_at,
+              :updated_at
+            ]}
 
   schema "machines" do
     field(:name, :string)
@@ -33,8 +35,10 @@ defmodule Orchestrator.Machines.Machine do
 
     field(:status, :string)
     field(:machine_type, :string)
+    field(:cpu, :float, default: 0.0)
     field(:cpu_count, :integer, default: 1)
     field(:memory_mb, :integer, default: 256)
+    field(:latency_ms, :float, default: 0.0)
     field(:service, :string)
     field(:config, :map, default: %{})
     field(:tags, :map, default: %{})
@@ -45,7 +49,7 @@ defmodule Orchestrator.Machines.Machine do
   end
 
   @required_fields ~w(name region status machine_type)a
-  @optional_fields ~w(id cpu_count memory_mb service config tags version metadata last_seen_at)a
+  @optional_fields ~w(id cpu cpu_count memory_mb latency_ms service config tags version metadata last_seen_at)a
   def changeset(machine, attrs) do
     machine
     |> cast(attrs, @required_fields ++ @optional_fields)
