@@ -1,12 +1,14 @@
 import Config
 
 if System.get_env("RELEASE_NAME") && config_env() == :prod do
-  database_path =
-    System.get_env("DATABASE_PATH") || "/app/data/orchestrator.db"
+  database_url =
+    System.get_env("DATABASE_URL") ||
+      raise "DATABASE_URL environment variable is not set"
 
   config :orchestrator, Orchestrator.Repo,
-    database: database_path,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "5")
+    url: database_url,
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    socket_options: if(System.get_env("ECTO_IPV6") == "true", do: [:inet6], else: [])
 
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||

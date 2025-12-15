@@ -43,7 +43,6 @@ defmodule Orchestrator.MixProject do
       {:ecto_sql, "~> 3.11"},
       {:postgrex, ">= 0.0.0"},
       {:exqlite, "~> 0.16"},
-      {:ecto_sqlite3, "~> 0.13"},
       {:finch, "~> 0.13"},
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.2"},
