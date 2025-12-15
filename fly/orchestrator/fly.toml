@@ -1,0 +1,69 @@
+app = "aerophoenix-orchestrator"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "60s"
+swap_size_mb = 0
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MIX_ENV = "prod"
+  ECTO_IPV6 = "true"
+  ERL_AFLAGS = "-proto_dist inet6_tcp"
+  PHX_SERVER = "true"
+  PHX_HOST = "aerophoenix-orchestrator.fly.dev"
+  PORT = "4001"
+  CLUSTER_SIZE = "1"
+  FLY_REGION = "iad"
+  PEER_REGIONS = ""
+  FLYD_SIM_URL = "http://aerophoenix-flyd-sim.internal:8080"
+  NATS_HOST = "aerophoenix-nats.internal"
+  NATS_PORT = "4222"
+  TELEMETRY_PORT = "9569"
+  ELIXIR_ERL_OPTIONS = "+sbwt none +sbwtdcpu none +sbwtdio none +P 1000000"
+  RELEASE_DISTRIBUTION = "name"
+  RELEASE_NODE = "orchestrator@${FLY_ALLOC_ID}.vm.${FLY_APP_NAME}.internal"
+  RECONCILER_INTERVAL = "120000"
+
+[http_service]
+  internal_port = 4001
+  force_https = true
+
+  processes = ["app"]
+
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 500
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "10s"
+  grace_period = "60s"
+  method = "GET"
+  path = "/api/v1/ping"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"
+
+[processes]
+  app = "/app/bin/orchestrator start"
+
+[mounts]
+  source = "orchestrator_data"
+  destination = "/app/data"
+  initial_size = "10gb"
+
+[deploy]
+  release_command = "/app/bin/orchestrator eval 'Orchestrator.Release.migrate'"
+  strategy = "rolling"
+
+[metrics]
+  port = 9569
+  path = "/metrics"

@@ -38,7 +38,7 @@ defmodule PhoenixUiWeb.DashboardLive do
         :timer.send_interval(@poll_interval_ms, :poll)
         :timer.send_interval(@poll_interval_ms, :chaos_poll)
         :timer.send_interval(5_000, :refresh_metrics)
-        Phoenix.PubSub.subscribe(Orchestrator.PubSub, "debugger:sessions")
+        Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "debugger:sessions")
         send(self(), :initial_push)
       end
 

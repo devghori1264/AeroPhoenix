@@ -43,7 +43,7 @@ func main() {
 	grpcAddr := flag.String("grpc-addr", ":"+grpcPort, "gRPC listen address")
 	httpAddr := flag.String("http-addr", ":"+httpPort, "HTTP shim listen address")
 	metricsAddr := flag.String("metrics-addr", ":"+metricsPort, "Metrics listen address")
-	dbPath := flag.String("db", "./data/badger", "Badger DB path")
+	dbPath := flag.String("db", getEnv("DB_PATH", "/data/badger"), "Badger DB path")
 	natsURL := flag.String("nats", getEnv("NATS_URL", "nats://nats:4222"), "NATS URL")
 	regionFlag := flag.String("region", region, "Region identifier (e.g., us-east-1, eu-west-1)")
 	flag.Parse()
@@ -51,6 +51,7 @@ func main() {
 	log.Printf("Starting flyd-sim in region: %s", *regionFlag)
 	log.Printf("Configuration: gRPC=%s, HTTP=%s, Metrics=%s, NATS=%s",
 		*grpcAddr, *httpAddr, *metricsAddr, *natsURL)
+	log.Printf("Database path: %s", *dbPath)
 
 	tp, err := initTracer()
 	if err != nil {

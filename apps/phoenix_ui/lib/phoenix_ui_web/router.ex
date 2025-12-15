@@ -55,6 +55,12 @@ defmodule PhoenixUiWeb.Router do
     get("/metrics", MetricsController, :index)
   end
 
+  scope "/", PhoenixUiWeb do
+    pipe_through(:api)
+    get("/health", HealthController, :index)
+    get("/health/ready", HealthController, :ready)
+  end
+
   if Mix.env() in [:dev, :test] do
     scope "/__dev", PhoenixUiWeb do
       pipe_through(:api)

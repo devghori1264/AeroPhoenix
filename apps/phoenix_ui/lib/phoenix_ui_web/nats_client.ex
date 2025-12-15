@@ -3,6 +3,7 @@ defmodule PhoenixUiWeb.NatsClient do
   require Logger
 
   @nats_url System.get_env("NATS_URL") || "nats://localhost:4222"
+  @reconnect_interval_ms 5_000
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
@@ -10,12 +11,31 @@ defmodule PhoenixUiWeb.NatsClient do
     GenServer.call(__MODULE__, {:publish, subject, payload})
   end
 
+  @impl true
   def init(_) do
     Process.flag(:trap_exit, true)
     send(self(), :connect)
     {:ok, nil}
   end
 
+  @impl true
+  def handle_call({:publish, subject, payload}, _from, conn) do
+    case conn do
+      nil ->
+        {:reply, {:error, :nats_unavailable}, conn}
+
+      pid ->
+        try do
+          :ok = Gnat.pub(pid, subject, Jason.encode!(payload))
+          {:reply, :ok, conn}
+        rescue
+          UndefinedFunctionError ->
+            {:reply, {:error, :gnat_not_loaded}, conn}
+        end
+    end
+  end
+
+  @impl true
   def handle_info(:connect, _state) do
     try do
       uri = URI.parse(@nats_url)
@@ -44,31 +64,18 @@ defmodule PhoenixUiWeb.NatsClient do
     end
   end
 
-  def handle_call({:publish, subject, payload}, _from, conn) do
-    case conn do
-      nil ->
-        {:reply, {:error, :nats_unavailable}, conn}
-
-      pid ->
-        try do
-          :ok = Gnat.pub(pid, subject, Jason.encode!(payload))
-          {:reply, :ok, conn}
-        rescue
-          UndefinedFunctionError ->
-            {:reply, {:error, :gnat_not_loaded}, conn}
-        end
-    end
+  @impl true
+  def handle_info(:reconnect, state) do
+    handle_info(:connect, state)
   end
 
+  @impl true
   def handle_info({:DOWN, _ref, :process, _pid, reason}, _state) do
     Logger.error("NATS connection down: #{inspect(reason)}; will attempt reconnect")
     schedule_reconnect()
     {:noreply, nil}
   end
 
-  def handle_info(:reconnect, state) do
-    handle_info(:connect, state)
-  end
 
-  defp schedule_reconnect, do: Process.send_after(self(), :reconnect, 5_000)
+  defp schedule_reconnect, do: Process.send_after(self(), :reconnect, @reconnect_interval_ms)
 end

@@ -3,24 +3,24 @@ import Config
 if System.get_env("RELEASE_NAME") && config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
-      "ecto://user:pass@localhost/db"
+      raise "DATABASE_URL environment variable is not set"
 
   config :orchestrator, Orchestrator.Repo,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    ssl: false
+    socket_options: if(System.get_env("ECTO_IPV6") == "true", do: [:inet6], else: [])
 
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
-      String.duplicate("a", 64)
+      raise "SECRET_KEY_BASE environment variable is not set"
 
   host = System.get_env("PHX_HOST") || "localhost"
-  port = String.to_integer(System.get_env("PORT") || "4000")
+  port = String.to_integer(System.get_env("PORT") || "4001")
 
   config :orchestrator, OrchestratorWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
-      ip: {0, 0, 0, 0},
+      ip: {0, 0, 0, 0, 0, 0, 0, 0},
       port: port
     ],
     secret_key_base: secret_key_base

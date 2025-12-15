@@ -27,7 +27,7 @@ defmodule PhoenixUiWeb.MachineChannel do
           batches_sent: 0
         })
 
-      Phoenix.PubSub.subscribe(Orchestrator.PubSub, "machine_logs:#{machine_id}")
+      Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "machine_logs:#{machine_id}")
 
       schedule_batch_send()
 
@@ -118,7 +118,7 @@ defmodule PhoenixUiWeb.MachineChannel do
   @impl true
   def handle_info({:log_event, log_entry}, socket) do
     new_stats = Map.update!(socket.assigns.stats, :total_logs, &(&1 + 1))
-    
+
     socket =
       socket
       |> assign(:stats, new_stats)
@@ -175,7 +175,7 @@ defmodule PhoenixUiWeb.MachineChannel do
       case TokenBucket.consume(socket.assigns.rate_limiter) do
         {:error, :rate_limited} ->
           new_stats = Map.update!(socket.assigns.stats, :rate_limited, &(&1 + 1))
-          
+
           socket
           |> assign(:stats, new_stats)
           |> maybe_notify_rate_limited()
@@ -219,7 +219,7 @@ defmodule PhoenixUiWeb.MachineChannel do
         push(socket, "logs", Enum.map(batch, &format_log_entry/1))
 
         new_stats = Map.update!(socket.assigns.stats, :batches_sent, &(&1 + 1))
-        
+
         socket
         |> assign(:buffer, buffer)
         |> assign(:stats, new_stats)

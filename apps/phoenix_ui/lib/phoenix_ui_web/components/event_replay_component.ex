@@ -59,7 +59,7 @@ defmodule PhoenixUiWeb.EventReplayComponent do
     case load_aggregate_events(aggregate_id, 1) do
       {:ok, result} ->
         if connected?(socket) do
-          Phoenix.PubSub.subscribe(Orchestrator.PubSub, "events:#{aggregate_id}")
+          Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "events:#{aggregate_id}")
         end
 
         {:noreply,
@@ -270,7 +270,7 @@ defmodule PhoenixUiWeb.EventReplayComponent do
   def handle_event("back_to_aggregates", _params, socket) do
     if socket.assigns.selected_aggregate do
       Phoenix.PubSub.unsubscribe(
-        Orchestrator.PubSub,
+        PhoenixUi.PubSub,
         "events:#{socket.assigns.selected_aggregate}"
       )
     end

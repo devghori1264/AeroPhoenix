@@ -82,14 +82,29 @@ async fn main() {
     let chaos_heal_route = warp::post()
         .and(warp::path!("chaos" / "heal"))
         .and(warp::body::json())
-        .and(chaos_state_filter)
+        .and(chaos_state_filter.clone())
         .and_then(handle_chaos_heal);
+
+    let health = warp::get()
+        .and(warp::path("health"))
+        .map(|| {
+            warp::reply::json(&GenericResp {
+                status: "ok".into(),
+            })
+        });
+
+    let chaos_status = warp::get()
+        .and(warp::path!("chaos" / "status"))
+        .and(chaos_state_filter)
+        .and_then(handle_chaos_status);
 
     let routes = partition
         .or(heal)
         .or(latency)
         .or(chaos_inject)
-        .or(chaos_heal_route);
+        .or(chaos_heal_route)
+        .or(health)
+        .or(chaos_status);
 
     println!("net-sim running at http://0.0.0.0:7070");
     warp::serve(routes).run(([0, 0, 0, 0], 7070)).await;
@@ -388,4 +403,25 @@ async fn handle_chaos_heal(
             status: "not_found".into(),
         }))
     }
+}
+
+/// Returns the current status of all active chaos incidents
+async fn handle_chaos_status(
+    state: ChaosState,
+) -> Result<impl warp::Reply, Infallible> {
+    let incidents = state.active_incidents.read().await;
+    let active: Vec<_> = incidents.values().cloned().collect();
+    
+    #[derive(Serialize)]
+    struct StatusResp {
+        status: String,
+        active_count: usize,
+        incidents: Vec<ChaosInjectReq>,
+    }
+    
+    Ok(warp::reply::json(&StatusResp {
+        status: "ok".into(),
+        active_count: active.len(),
+        incidents: active,
+    }))
 }

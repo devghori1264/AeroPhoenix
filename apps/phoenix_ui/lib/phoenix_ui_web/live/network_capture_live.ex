@@ -11,7 +11,7 @@ defmodule PhoenixUiWeb.NetworkCaptureLive do
   @impl true
   def mount(%{"machine_id" => machine_id}, _session, socket) do
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Orchestrator.PubSub, "network_capture:#{machine_id}")
+      Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "network_capture:#{machine_id}")
     end
 
     initial_state = %{
@@ -615,7 +615,7 @@ defmodule PhoenixUiWeb.NetworkCaptureLive do
     receive do
       {:DOWN, ^ref, :process, ^capture_pid, _reason} ->
         Phoenix.PubSub.broadcast(
-          Orchestrator.PubSub,
+          PhoenixUi.PubSub,
           "network_capture:#{machine_id}",
           {:capture_stopped, :normal}
         )

@@ -2,8 +2,10 @@ defmodule PhoenixUiWeb.FlydClient do
   require Logger
   alias Finch.Response
 
-  @base Application.compile_env(:phoenix_ui, :flyd_base, "http://localhost:8080")
-  @headers [{"content-type", "application/json"}]
+
+  defp base_url do
+    Application.get_env(:phoenix_ui, :flyd_base) || "http://localhost:8080"
+  end
 
   @spec ping() :: {:ok, map()} | {:error, any()}
   def ping do
@@ -28,9 +30,10 @@ defmodule PhoenixUiWeb.FlydClient do
   end
 
   defp get(path) do
-    url = @base <> path
+    {url, host_header} = resolve_url_with_ipv6(base_url() <> path)
     Logger.debug("[FlydClient] GET #{url}")
-    req = Finch.build(:get, url, @headers)
+    headers = [{"content-type", "application/json"}, {"host", host_header}]
+    req = Finch.build(:get, url, headers)
 
     case Finch.request(req, PhoenixUiWeb.Finch) do
       {:ok, %Response{status: status, body: body}} when status in 200..299 ->
@@ -48,9 +51,10 @@ defmodule PhoenixUiWeb.FlydClient do
   end
 
   defp post(path, body) do
-    url = @base <> path
+    {url, host_header} = resolve_url_with_ipv6(base_url() <> path)
     Logger.debug("[FlydClient] POST #{url}")
-    req = Finch.build(:post, url, @headers, body)
+    headers = [{"content-type", "application/json"}, {"host", host_header}]
+    req = Finch.build(:post, url, headers, body)
 
     case Finch.request(req, PhoenixUiWeb.Finch) do
       {:ok, %Response{status: status, body: body}} when status in 200..299 ->
@@ -64,6 +68,31 @@ defmodule PhoenixUiWeb.FlydClient do
       {:error, reason} ->
         Logger.error("[FlydClient] POST error for URL: #{url}. Reason: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  defp resolve_url_with_ipv6(url) do
+    uri = URI.parse(url)
+    host = uri.host
+    port = uri.port
+
+    original_host = if port, do: "#{host}:#{port}", else: host
+
+    if host && String.ends_with?(host, ".internal") do
+      case :inet.getaddr(String.to_charlist(host), :inet6) do
+        {:ok, ip_tuple} ->
+          ip_str = :inet.ntoa(ip_tuple) |> to_string()
+          port_str = if port, do: ":#{port}", else: ""
+          path_str = uri.path || ""
+          query_str = if uri.query, do: "?#{uri.query}", else: ""
+          resolved_url = "#{uri.scheme}://[#{ip_str}]#{port_str}#{path_str}#{query_str}"
+          {resolved_url, original_host}
+
+        {:error, _reason} ->
+          {url, original_host}
+      end
+    else
+      {url, original_host}
     end
   end
 

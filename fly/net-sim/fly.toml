@@ -1,0 +1,44 @@
+app = "aerophoenix-net-sim"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "15s"
+swap_size_mb = 0
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  FLYD_SIM_BASE = "http://aerophoenix-flyd-sim.internal:8080"
+  RUST_LOG = "info"
+  ENABLE_LATENCY_INJECTION = "true"
+  ENABLE_PACKET_LOSS = "false"
+  ENABLE_NETWORK_PARTITION = "false"
+
+[http_service]
+  internal_port = 7070
+  force_https = true
+
+  processes = ["app"]
+
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 25
+    hard_limit = 50
+
+[[http_service.checks]]
+  interval = "60s"
+  timeout = "5s"
+  grace_period = "15s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[processes]
+  app = "/usr/local/bin/net_sim"

@@ -406,7 +406,7 @@ defmodule Orchestrator.Manager do
   end
 
   defp schedule_reconcile do
-    unless Mix.env() == :test do
+    unless Application.get_env(:orchestrator, :env) == :test do
       Process.send_after(self(), :reconcile, @reconcile_interval)
     end
   end

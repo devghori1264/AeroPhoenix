@@ -3,11 +3,24 @@ defmodule PhoenixUi.Application do
 
   @impl true
   def start(_type, _args) do
+    :inet_db.set_lookup([:file, :native])
+
+    finch_pools = %{
+      :default => [
+        size: 10,
+        conn_opts: [
+          transport_opts: [
+            inet6: true
+          ]
+        ]
+      ]
+    }
+
     children = [
       PhoenixUiWeb.Telemetry,
       {Phoenix.PubSub, name: PhoenixUi.PubSub, adapter: Phoenix.PubSub.PG2},
       PhoenixUiWeb.Endpoint,
-      {Finch, name: PhoenixUiWeb.Finch},
+      {Finch, name: PhoenixUiWeb.Finch, pools: finch_pools},
       PhoenixUi.Machines,
       PhoenixUi.Predictive,
       PhoenixUiWeb.TelemetryMetrics,

@@ -1,0 +1,1521 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*.*.*'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - 'LICENSE'
+      - '.gitignore'
+
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip test phase (emergency deployments only)'
+        required: false
+        default: false
+        type: boolean
+      deploy_services:
+        description: 'Services to deploy (comma-separated or "all")'
+        required: false
+        default: 'all'
+        type: string
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_USERNAME: ${{ github.actor }}
+  IMAGE_PREFIX: ${{ github.repository_owner }}/aerophoenix
+
+  GIT_SHA: ${{ github.sha }}
+  GIT_REF: ${{ github.ref_name }}
+
+  ELIXIR_VERSION: '1.15.7'
+  OTP_VERSION: '26.2.1'
+  GO_VERSION: '1.22'
+  RUST_VERSION: '1.75'
+  NODE_VERSION: '20'
+
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  FLY_ORG: ${{ secrets.FLY_ORG || 'personal' }}
+  FLY_PRIMARY_REGION: 'iad'
+
+  PHOENIX_UI_APP: 'aerophoenix'
+  ORCHESTRATOR_APP: 'aerophoenix-orchestrator'
+  FLYD_SIM_APP: 'aerophoenix-flyd-sim'
+  NET_SIM_APP: 'aerophoenix-net-sim'
+
+  TEST_DATABASE_URL: 'ecto://postgres:postgres@localhost:5432/aerophoenix_test'
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DB: aerophoenix_test
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+  issues: write
+  security-events: write
+  actions: read
+  checks: write
+  statuses: write
+
+jobs:
+  preflight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      should_deploy: ${{ steps.changes.outputs.should_deploy }}
+      services_changed: ${{ steps.changes.outputs.services }}
+      is_release: ${{ steps.context.outputs.is_release }}
+      version: ${{ steps.context.outputs.version }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Context
+        id: context
+        run: |
+          # Determine if this is a release
+          IS_RELEASE="false"
+          VERSION="dev-${{ github.sha }}"
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            IS_RELEASE="true"
+            VERSION="${{ github.ref_name }}"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            VERSION="main-${{ github.sha }}"
+          fi
+
+          echo "is_release=${IS_RELEASE}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+          echo "Build Context:"
+          echo "  - Is Release: ${IS_RELEASE}"
+          echo "  - Version: ${VERSION}"
+          echo "  - Ref: ${{ github.ref }}"
+          echo "  - SHA: ${{ github.sha }}"
+
+      - name: Detect Changed Files
+        id: changes
+        run: |
+          # =============================================================================
+          # CHANGE DETECTION ENGINE
+          # =============================================================================
+          # This script determines which services have changed and need to be rebuilt.
+          # It handles multiple scenarios:
+          #   1. Pull Requests: Compare against the base branch
+          #   2. Push to existing branch: Compare against previous commit
+          #   3. New branch (first push): Compare against default branch (origin/main)
+          #   4. Force push with null before: Compare against default branch
+          # =============================================================================
+
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "🔍 CHANGE DETECTION ENGINE"
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo ""
+
+          # -----------------------------------------------------------------------------
+          # Step 1: Determine the correct BASE_SHA for comparison
+          # -----------------------------------------------------------------------------
+          determine_base_sha() {
+            local event_name="$1"
+            local before_sha="$2"
+            local default_branch="origin/main"
+
+            if [ "$event_name" == "pull_request" ]; then
+              # For PRs, always compare against the base branch
+              echo "${{ github.event.pull_request.base.sha }}"
+              return
+            fi
+
+            # For push events, check if we have a valid 'before' SHA
+            if [ -n "$before_sha" ] && 
+               [ "$before_sha" != "0000000000000000000000000000000000000000" ] &&
+               git cat-file -t "$before_sha" >/dev/null 2>&1; then
+              # Valid before SHA exists and is reachable
+              echo "$before_sha"
+              return
+            fi
+
+            # Fallback scenarios:
+            # - New branch (before is null/zero)
+            # - Force push where before is unreachable
+            # - First commit to repository
+            
+            # Ensure we have the default branch
+            git fetch origin main --depth=100 2>/dev/null || true
+            
+            if git rev-parse --verify "$default_branch" >/dev/null 2>&1; then
+              # Find the merge base with main to get accurate diff
+              local merge_base
+              merge_base=$(git merge-base "$default_branch" HEAD 2>/dev/null || echo "")
+              
+              if [ -n "$merge_base" ]; then
+                echo "$merge_base"
+                return
+              fi
+              
+              # If no merge base, use main directly
+              echo "$default_branch"
+              return
+            fi
+
+            # Last resort: compare against parent commit
+            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              echo "HEAD~1"
+            else
+              # First commit in repo - use empty tree
+              echo "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+            fi
+          }
+
+          BASE_SHA=$(determine_base_sha "${{ github.event_name }}" "${{ github.event.before }}")
+          HEAD_SHA="${{ github.sha }}"
+
+          echo "📊 Comparison Details:"
+          echo "   Event Type: ${{ github.event_name }}"
+          echo "   Base SHA:   $BASE_SHA"
+          echo "   Head SHA:   $HEAD_SHA"
+          echo "   Branch:     ${{ github.ref_name }}"
+          echo ""
+
+          # -----------------------------------------------------------------------------
+          # Step 2: Get list of changed files
+          # -----------------------------------------------------------------------------
+          echo "📁 Detecting changed files..."
+          
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo "")
+          FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c . || echo "0")
+          
+          echo "   Found $FILE_COUNT changed files"
+          echo ""
+
+          # -----------------------------------------------------------------------------
+          # Step 3: Initialize service change flags
+          # -----------------------------------------------------------------------------
+          PHOENIX_UI_CHANGED="false"
+          ORCHESTRATOR_CHANGED="false"
+          FLYD_SIM_CHANGED="false"
+          NET_SIM_CHANGED="false"
+          INFRA_CHANGED="false"
+
+          for file in $CHANGED_FILES; do
+            case "$file" in
+              apps/phoenix_ui/*)
+                PHOENIX_UI_CHANGED="true"
+                ;;
+              apps/orchestrator/*)
+                ORCHESTRATOR_CHANGED="true"
+                ;;
+              apps/flyd-sim/*)
+                FLYD_SIM_CHANGED="true"
+                ;;
+              apps/net-sim/*)
+                NET_SIM_CHANGED="true"
+                ;;
+              fly/phoenix-ui/*)
+                PHOENIX_UI_CHANGED="true"
+                INFRA_CHANGED="true"
+                ;;
+              fly/orchestrator/*)
+                ORCHESTRATOR_CHANGED="true"
+                INFRA_CHANGED="true"
+                ;;
+              fly/flyd-sim/*)
+                FLYD_SIM_CHANGED="true"
+                INFRA_CHANGED="true"
+                ;;
+              fly/net-sim/*)
+                NET_SIM_CHANGED="true"
+                INFRA_CHANGED="true"
+                ;;
+              fly/scripts/*|infra/*|.github/workflows/*)
+                INFRA_CHANGED="true"
+                # When deployment scripts or CI/CD changes, redeploy all services for safety
+                PHOENIX_UI_CHANGED="true"
+                ORCHESTRATOR_CHANGED="true"
+                FLYD_SIM_CHANGED="true"
+                NET_SIM_CHANGED="true"
+                ;;
+              proto/*)
+                # Proto changes affect both orchestrator and flyd-sim
+                ORCHESTRATOR_CHANGED="true"
+                FLYD_SIM_CHANGED="true"
+                ;;
+              *)
+                # Log unhandled file for debugging
+                echo "Untracked file change: $file"
+                ;;
+            esac
+          done
+
+          # Build services JSON
+          SERVICES_JSON=$(cat <<EOF
+          {
+            "phoenix_ui": $PHOENIX_UI_CHANGED,
+            "orchestrator": $ORCHESTRATOR_CHANGED,
+            "flyd_sim": $FLYD_SIM_CHANGED,
+            "net_sim": $NET_SIM_CHANGED,
+            "infra": $INFRA_CHANGED
+          }
+          EOF
+          )
+
+          # Determine if deployment should happen
+          SHOULD_DEPLOY="false"
+          if [ "${{ github.ref }}" == "refs/heads/main" ] || [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            if [ "${{ inputs.force_deploy }}" == "true" ] || \
+                [ "$PHOENIX_UI_CHANGED" == "true" ] || \
+                [ "$ORCHESTRATOR_CHANGED" == "true" ] || \
+                [ "$FLYD_SIM_CHANGED" == "true" ] || \
+                [ "$NET_SIM_CHANGED" == "true" ] || \
+                [ "$INFRA_CHANGED" == "true" ]; then
+              SHOULD_DEPLOY="true"
+            fi
+          fi
+
+          echo "services=${SERVICES_JSON}" >> $GITHUB_OUTPUT
+          echo "should_deploy=${SHOULD_DEPLOY}" >> $GITHUB_OUTPUT
+
+          echo "Changed Services:"
+          echo "${SERVICES_JSON}" | jq .
+          echo "Should Deploy: ${SHOULD_DEPLOY}"
+
+      - name: Validate Workflow Files
+        run: |
+          # Check for valid YAML in workflow files
+          for file in .github/workflows/*.yml; do
+            echo "Validating: $file"
+            python3 -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
+          done
+          echo "✅ All workflow files are valid YAML"
+
+  quality-elixir:
+    name: Elixir Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: preflight
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        id: deps-cache
+        with:
+          path: |
+            apps/orchestrator/deps
+            apps/orchestrator/_build
+            apps/phoenix_ui/deps
+            apps/phoenix_ui/_build
+          key: elixir-deps-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            elixir-deps-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+            elixir-deps-${{ runner.os }}-
+
+      - name: Install Dependencies
+        run: |
+          echo "Installing Orchestrator dependencies..."
+          cd apps/orchestrator && mix deps.get
+          echo "Installing Phoenix UI dependencies..."
+          cd ../phoenix_ui && mix deps.get
+
+      - name: Check Code Formatting
+        run: |
+          echo "Checking Orchestrator formatting..."
+          cd apps/orchestrator && mix format --check-formatted
+          echo "Checking Phoenix UI formatting..."
+          cd ../phoenix_ui && mix format --check-formatted
+          echo "✅ All Elixir code is properly formatted"
+
+      - name: Run Credo (Static Analysis)
+        run: |
+          echo "Running Credo on Orchestrator..."
+          cd apps/orchestrator && mix credo --strict || true
+          echo "Running Credo on Phoenix UI..."
+          cd ../phoenix_ui && mix credo --strict || true
+
+      - name: Compile with Warnings as Errors
+        run: |
+          echo "Compiling Orchestrator with strict warnings..."
+          cd apps/orchestrator && mix compile --warnings-as-errors
+          echo "Compiling Phoenix UI with strict warnings..."
+          cd ../phoenix_ui && mix compile --warnings-as-errors
+          echo "✅ All Elixir code compiles cleanly"
+
+      - name: Security Audit (Mix Audit)
+        run: |
+          echo "Auditing Orchestrator dependencies..."
+          cd apps/orchestrator && mix deps.audit || true
+          echo "Auditing Phoenix UI dependencies..."
+          cd ../phoenix_ui && mix deps.audit || true
+        continue-on-error: true
+
+  quality-go:
+    name: Go Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: preflight
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            apps/flyd-sim/go.sum
+            cli/aeropctl/go.sum
+
+      - name: Check Go Formatting
+        run: |
+          echo "Checking flyd-sim formatting..."
+          cd apps/flyd-sim
+          if [ -n "$(gofmt -s -l .)" ]; then
+            echo "❌ Go code is not formatted:"
+            gofmt -s -d .
+            exit 1
+          fi
+          echo "Checking CLI formatting..."
+          cd ../../cli/aeropctl
+          if [ -n "$(gofmt -s -l .)" ]; then
+            echo "❌ CLI code is not formatted:"
+            gofmt -s -d .
+            exit 1
+          fi
+          echo "✅ All Go code is properly formatted"
+
+      - name: Run Go Vet
+        run: |
+          echo "Vetting flyd-sim..."
+          cd apps/flyd-sim && go vet ./...
+          echo "Vetting CLI..."
+          cd ../../cli/aeropctl && go vet ./...
+          echo "✅ Go vet passed"
+
+      - name: Run staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: "latest"
+          install-go: false
+          working-directory: apps/flyd-sim
+        continue-on-error: true
+
+      - name: Run gosec (Security Scanner)
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+          working-directory: apps/flyd-sim
+        continue-on-error: true
+
+      - name: Upload Go Security Results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: apps/flyd-sim/gosec-results.sarif
+        continue-on-error: true
+
+  quality-rust:
+    name: Rust Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: preflight
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            apps/net-sim/target/
+          key: rust-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            rust-${{ runner.os }}-
+
+      - name: Check Rust Formatting
+        run: |
+          cd apps/net-sim
+          cargo fmt -- --check
+          echo "✅ Rust code is properly formatted"
+
+      - name: Run Clippy (Linter)
+        run: |
+          cd apps/net-sim
+          cargo clippy --all-targets --all-features -- -D warnings
+          echo "✅ Clippy passed"
+
+      - name: Run cargo-audit (Security)
+        run: |
+          cargo install cargo-audit || true
+          cd apps/net-sim
+          cargo audit || true
+        continue-on-error: true
+
+  test-elixir:
+    name: Elixir Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [quality-elixir]
+    if: ${{ !inputs.skip_tests }}
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      nats:
+        image: nats:2.10-alpine
+        ports:
+          - 4222:4222
+        options: >-
+          --health-cmd "wget -q --spider http://localhost:8222/healthz || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Setup Go (for flyd-sim)
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Restore Dependencies Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/orchestrator/deps
+            apps/orchestrator/_build
+            apps/phoenix_ui/deps
+            apps/phoenix_ui/_build
+          key: elixir-deps-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('**/mix.lock') }}
+
+      - name: Install Dependencies
+        run: |
+          cd apps/orchestrator && mix deps.get
+          cd ../phoenix_ui && mix deps.get
+
+      - name: Build flyd-sim Binary
+        run: |
+          mkdir -p apps/orchestrator/bin
+          cd apps/flyd-sim
+          go build -o ../orchestrator/bin/flyd-sim ./cmd/server
+          chmod +x ../orchestrator/bin/flyd-sim
+          echo "✅ flyd-sim binary built"
+
+      - name: Prepare Test Environment
+        run: |
+          # Create required directories
+          mkdir -p apps/orchestrator/tmp/test_machines
+          mkdir -p apps/orchestrator/data/machines
+          mkdir -p apps/orchestrator/data/badger
+          chmod -R 777 apps/orchestrator/tmp
+          chmod -R 777 apps/orchestrator/data
+
+          # Increase file descriptor limits
+          ulimit -n 65535 || true
+          sudo sysctl -w fs.file-max=65535 || true
+
+      - name: Start flyd-sim Service
+        run: |
+          cd apps/orchestrator
+          ./bin/flyd-sim --db ./data/badger --nats "" &
+          FLYD_PID=$!
+          echo "FLYD_PID=${FLYD_PID}" >> $GITHUB_ENV
+
+          # Wait for HTTP server
+          echo "Waiting for flyd-sim to start..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:8080/ping > /dev/null 2>&1; then
+              echo "✅ flyd-sim is ready (attempt $i)"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ flyd-sim failed to start"
+              exit 1
+            fi
+            echo "  Waiting... ($i/30)"
+            sleep 1
+          done
+
+      - name: Setup Database
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          MIX_ENV: test
+        run: |
+          cd apps/orchestrator
+          mix ecto.create
+          mix ecto.migrate
+          echo "✅ Database setup complete"
+
+      - name: Run Orchestrator Tests
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          MIX_ENV: test
+          FLYD_SIM_URL: http://localhost:8080
+          NATS_URL: nats://localhost:4222
+        run: |
+          cd apps/orchestrator
+          mix test --color --max-failures=10 --trace
+          echo "✅ Orchestrator tests passed"
+
+      - name: Run Phoenix UI Tests
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          MIX_ENV: test
+        run: |
+          cd apps/phoenix_ui
+          mix test --color --max-failures=10 --trace
+          echo "✅ Phoenix UI tests passed"
+
+      - name: Generate Coverage Report
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          MIX_ENV: test
+        run: |
+          cd apps/orchestrator
+          mix test --cover --export-coverage default
+          mix test.coverage || true
+        continue-on-error: true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          if [ -n "$FLYD_PID" ]; then
+            kill $FLYD_PID 2>/dev/null || true
+          fi
+
+  test-go:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [quality-go]
+    if: ${{ !inputs.skip_tests }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Test flyd-sim
+        run: |
+          cd apps/flyd-sim
+          go mod tidy
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          echo "✅ flyd-sim tests passed"
+
+      - name: Test CLI
+        run: |
+          cd cli/aeropctl
+          go mod tidy
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          echo "✅ CLI tests passed"
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: apps/flyd-sim/coverage.out,cli/aeropctl/coverage.out
+          flags: go
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  test-rust:
+    name: Rust Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [quality-rust]
+    if: ${{ !inputs.skip_tests }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            apps/net-sim/target/
+          key: rust-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run Tests
+        run: |
+          cd apps/net-sim
+          cargo test --verbose --all-features
+          echo "✅ net-sim tests passed"
+
+      - name: Generate Coverage Report
+        run: |
+          cargo install cargo-tarpaulin || true
+          cd apps/net-sim
+          cargo tarpaulin --out Xml --output-dir coverage || true
+        continue-on-error: true
+
+  build-images:
+    name: Build ${{ matrix.service }} Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [preflight, test-elixir, test-go, test-rust]
+    if: |
+      always() &&
+      (needs.test-elixir.result == 'success' || needs.test-elixir.result == 'skipped') &&
+      (needs.test-go.result == 'success' || needs.test-go.result == 'skipped') &&
+      (needs.test-rust.result == 'success' || needs.test-rust.result == 'skipped')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Phoenix UI - Elixir/Phoenix frontend (no persistent volume)
+          - service: phoenix-ui
+            context: .
+            dockerfile: fly/phoenix-ui/Dockerfile
+            image_name: phoenix-ui
+            service_key: phoenix_ui
+            uses_volume: false
+          # Orchestrator - Elixir control plane (SQLite on volume)
+          - service: orchestrator
+            context: .
+            dockerfile: fly/orchestrator/Dockerfile
+            image_name: orchestrator
+            service_key: orchestrator
+            uses_volume: true
+          # Flyd-sim - Go simulator (BadgerDB on volume)
+          - service: flyd-sim
+            context: .
+            dockerfile: fly/flyd-sim/Dockerfile
+            image_name: flyd-sim
+            service_key: flyd_sim
+            uses_volume: true
+          # Net-sim - Rust chaos engineering (no persistent volume)
+          - service: net-sim
+            context: .
+            dockerfile: fly/net-sim/Dockerfile
+            image_name: net-sim
+            service_key: net_sim
+            uses_volume: false
+
+    outputs:
+      phoenix-ui-digest: ${{ steps.build.outputs.digest }}
+      phoenix-ui-built: ${{ steps.check.outputs.should_build }}
+      orchestrator-digest: ${{ steps.build.outputs.digest }}
+      orchestrator-built: ${{ steps.check.outputs.should_build }}
+      flyd-sim-digest: ${{ steps.build.outputs.digest }}
+      flyd-sim-built: ${{ steps.check.outputs.should_build }}
+      net-sim-digest: ${{ steps.build.outputs.digest }}
+      net-sim-built: ${{ steps.check.outputs.should_build }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # =========================================================================
+      # SMART BUILD DETECTION
+      # =========================================================================
+      # Only build images for services that have actually changed.
+      # This saves significant CI/CD time and costs.
+      # =========================================================================
+      - name: 🔍 Check if Service Needs Building
+        id: check
+        run: |
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "🔍 BUILD REQUIREMENT CHECK: ${{ matrix.service }}"
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo ""
+
+          # Parse the services_changed JSON from preflight
+          SERVICES_JSON='${{ needs.preflight.outputs.services_changed }}'
+          
+          # Extract the change status for this specific service
+          SERVICE_CHANGED=$(echo "$SERVICES_JSON" | jq -r '.${{ matrix.service_key }} // false')
+          INFRA_CHANGED=$(echo "$SERVICES_JSON" | jq -r '.infra // false')
+          FORCE_BUILD="${{ inputs.force_deploy }}"
+
+          echo "📊 Build Decision Matrix:"
+          echo "   ├─ Service Key:      ${{ matrix.service_key }}"
+          echo "   ├─ Service Changed:  $SERVICE_CHANGED"
+          echo "   ├─ Infra Changed:    $INFRA_CHANGED"
+          echo "   ├─ Force Build:      $FORCE_BUILD"
+          echo "   └─ Uses Volume:      ${{ matrix.uses_volume }}"
+          echo ""
+
+          # Determine if we should build this image
+          SHOULD_BUILD="false"
+          BUILD_REASON=""
+
+          if [ "$FORCE_BUILD" == "true" ]; then
+            SHOULD_BUILD="true"
+            BUILD_REASON="Force build requested via workflow dispatch"
+          elif [ "$SERVICE_CHANGED" == "true" ]; then
+            SHOULD_BUILD="true"
+            BUILD_REASON="Service files changed"
+          elif [ "$INFRA_CHANGED" == "true" ]; then
+            SHOULD_BUILD="true"
+            BUILD_REASON="Infrastructure files changed (safety rebuild)"
+          fi
+
+          # Set outputs
+          echo "should_build=$SHOULD_BUILD" >> $GITHUB_OUTPUT
+          echo "build_reason=$BUILD_REASON" >> $GITHUB_OUTPUT
+
+          # Log decision
+          if [ "$SHOULD_BUILD" == "true" ]; then
+            echo "✅ BUILDING: ${{ matrix.service }}"
+            echo "   Reason: $BUILD_REASON"
+            echo "::notice::Building ${{ matrix.service }} - $BUILD_REASON"
+          else
+            echo "⏭️  SKIPPING: ${{ matrix.service }}"
+            echo "   Reason: No changes detected"
+            echo "::notice::Skipping ${{ matrix.service }} build - no changes detected"
+          fi
+          echo ""
+
+      - name: Setup Docker Buildx
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      - name: Login to GitHub Container Registry
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY_USERNAME }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Metadata
+        if: steps.check.outputs.should_build == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image_name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Cache Docker Layers
+        if: steps.check.outputs.should_build == 'true'
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: buildx-${{ matrix.service }}-${{ github.sha }}
+          restore-keys: |
+            buildx-${{ matrix.service }}-
+
+      - name: 🏗️ Build and Push Image
+        if: steps.check.outputs.should_build == 'true'
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_REF=${{ github.ref_name }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+
+      - name: Move Cache
+        if: steps.check.outputs.should_build == 'true'
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: 📋 Report Build Skipped
+        if: steps.check.outputs.should_build == 'false'
+        run: |
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "⏭️  BUILD SKIPPED: ${{ matrix.service }}"
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "This service was not rebuilt because no relevant changes were detected."
+          echo "The existing image from the previous successful build will be used."
+          echo ""
+          echo "To force a rebuild, use the 'force_deploy' option in workflow dispatch."
+          echo ""
+
+      - name: 🔒 Scan Image for Vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        if: steps.check.outputs.should_build == 'true' && github.event_name != 'pull_request'
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image_name }}:sha-${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+        continue-on-error: true
+
+      - name: 📤 Upload Trivy Scan Results
+        uses: github/codeql-action/upload-sarif@v3
+        if: steps.check.outputs.should_build == 'true' && github.event_name != 'pull_request'
+        with:
+          sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [preflight, build-images]
+    if: |
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
+      github.event_name != 'pull_request' &&
+      needs.preflight.outputs.should_deploy == 'true'
+
+    environment:
+      name: ${{ inputs.environment || 'production' }}
+      url: https://aerophoenix.fly.dev
+
+    # =========================================================================
+    # DEPLOYMENT STRATEGY
+    # =========================================================================
+    # Services are deployed in dependency order:
+    #   1. flyd-sim (backend simulator - BadgerDB on volume)
+    #   2. net-sim (chaos engineering - stateless)
+    #   3. orchestrator (control plane - SQLite on volume)
+    #   4. phoenix-ui (frontend - stateless)
+    #
+    # CRITICAL: Volume-backed services use 'immediate' strategy to avoid
+    # volume lock conflicts during rolling deploys.
+    # =========================================================================
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          # Backend services (deploy first)
+          - service: flyd-sim
+            app_name: aerophoenix-flyd-sim
+            working_dir: fly/flyd-sim
+            order: 1
+            service_key: flyd_sim
+            uses_volume: true       # BadgerDB - needs immediate strategy
+            deploy_strategy: immediate
+          - service: net-sim
+            app_name: aerophoenix-net-sim
+            working_dir: fly/net-sim
+            order: 2
+            service_key: net_sim
+            uses_volume: false      # Stateless - can use rolling
+            deploy_strategy: rolling
+          # Control plane (deploy after backends)
+          - service: orchestrator
+            app_name: aerophoenix-orchestrator
+            working_dir: fly/orchestrator
+            order: 3
+            service_key: orchestrator
+            uses_volume: true       # SQLite - needs immediate strategy
+            deploy_strategy: immediate
+          # Frontend (deploy last)
+          - service: phoenix-ui
+            app_name: aerophoenix
+            working_dir: fly/phoenix-ui
+            order: 4
+            service_key: phoenix_ui
+            uses_volume: false      # Stateless - can use rolling
+            deploy_strategy: rolling
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔍 Check if Service Changed
+        id: should_deploy_service
+        run: |
+          SERVICES_JSON='${{ needs.preflight.outputs.services_changed }}'
+          SERVICE_CHANGED=$(echo "$SERVICES_JSON" | jq -r '.${{ matrix.service_key }}')
+          INFRA_CHANGED=$(echo "$SERVICES_JSON" | jq -r '.infra')
+          FORCE_DEPLOY="${{ inputs.force_deploy }}"
+
+          echo "📊 Service Change Detection for: ${{ matrix.service }}"
+          echo "  - Service Changed: $SERVICE_CHANGED"
+          echo "  - Infra Changed: $INFRA_CHANGED"
+          echo "  - Force Deploy: $FORCE_DEPLOY"
+
+          if [ "$FORCE_DEPLOY" == "true" ] || [ "$SERVICE_CHANGED" == "true" ] || [ "$INFRA_CHANGED" == "true" ]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "✅ Will deploy ${{ matrix.service }}"
+            echo "::notice::Deploying ${{ matrix.service }} (Changed: $SERVICE_CHANGED, Infra: $INFRA_CHANGED, Force: $FORCE_DEPLOY)"
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Skipping ${{ matrix.service }} (no changes detected)"
+            echo "::notice::Skipping ${{ matrix.service }} deployment - no changes"
+          fi
+
+      - name: Setup Fly CLI
+        if: steps.should_deploy_service.outputs.should_deploy == 'true'
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Check Fly.io App Status
+        if: steps.should_deploy_service.outputs.should_deploy == 'true'
+        id: status
+        run: |
+          set +e
+          flyctl status -a ${{ matrix.app_name }} > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ App ${{ matrix.app_name }} exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "App ${{ matrix.app_name }} does not exist"
+          fi
+
+      - name: Create Fly.io App (if needed)
+        if: steps.status.outputs.exists == 'false'
+        run: |
+          echo "Creating app ${{ matrix.app_name }}..."
+          flyctl apps create ${{ matrix.app_name }} --org ${{ env.FLY_ORG }} || true
+
+      - name: Pre-Deployment Health Check
+        if: steps.should_deploy_service.outputs.should_deploy == 'true' && steps.status.outputs.exists == 'true'
+        run: |
+          echo "Checking current deployment status..."
+          flyctl status -a ${{ matrix.app_name }} || true
+
+      - name: 🚀 Deploy ${{ matrix.service }}
+        if: steps.should_deploy_service.outputs.should_deploy == 'true'
+        id: deploy
+        run: |
+          cd ${{ matrix.working_dir }}
+          
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "🚀 DEPLOYING: ${{ matrix.service }}"
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Deployment Configuration:"
+          echo "   ├─ App Name:        ${{ matrix.app_name }}"
+          echo "   ├─ Strategy:        ${{ matrix.deploy_strategy }}"
+          echo "   ├─ Uses Volume:     ${{ matrix.uses_volume }}"
+          echo "   ├─ Image:           ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:sha-${{ github.sha }}"
+          echo "   └─ Timeout:         300s"
+          echo ""
+
+          # Record start time for metrics
+          DEPLOY_START=$(date +%s)
+
+          # =======================================================================
+          # STRATEGY SELECTION
+          # =======================================================================
+          # - rolling: Zero-downtime deploy, new machines start before old stop
+          #            Good for stateless services, BAD for volume-backed services
+          #            (volume lock can cause the new machine to fail to start)
+          #
+          # - immediate: Stop old machines first, then start new ones
+          #              Brief downtime but safe for volume-backed services
+          #              Required for BadgerDB/SQLite with Fly volumes
+          # =======================================================================
+          STRATEGY="${{ matrix.deploy_strategy }}"
+          
+          echo "📊 Using $STRATEGY strategy"
+          if [ "$STRATEGY" == "immediate" ]; then
+            echo "   ℹ️  Immediate strategy chosen because this service uses persistent volumes"
+            echo "      Volume-backed services can't run rolling deploys (volume lock conflict)"
+          else
+            echo "   ℹ️  Rolling strategy chosen for zero-downtime deployment"
+          fi
+          echo ""
+
+          # Deploy with the appropriate strategy
+          flyctl deploy \
+            --app ${{ matrix.app_name }} \
+            --remote-only \
+            --strategy "$STRATEGY" \
+            --wait-timeout 300 \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:sha-${{ github.sha }} \
+            2>&1 | tee deploy.log
+
+          DEPLOY_EXIT_CODE=${PIPESTATUS[0]}
+          DEPLOY_END=$(date +%s)
+          DEPLOY_DURATION=$((DEPLOY_END - DEPLOY_START))
+
+          # Record deployment metrics
+          echo "duration=$DEPLOY_DURATION" >> $GITHUB_OUTPUT
+
+          if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
+            echo ""
+            echo "═══════════════════════════════════════════════════════════════════"
+            echo "✅ DEPLOYMENT SUCCESSFUL: ${{ matrix.service }}"
+            echo "═══════════════════════════════════════════════════════════════════"
+            echo "   Duration: ${DEPLOY_DURATION}s"
+            echo "success=true" >> $GITHUB_OUTPUT
+            
+            # Get deployment version
+            VERSION=$(flyctl releases -a ${{ matrix.app_name }} --json 2>/dev/null | jq -r '.[0].Version // "unknown"')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            echo ""
+            echo "═══════════════════════════════════════════════════════════════════"
+            echo "❌ DEPLOYMENT FAILED: ${{ matrix.service }}"
+            echo "═══════════════════════════════════════════════════════════════════"
+            echo "success=false" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "📋 Deployment Log (last 50 lines):"
+            tail -50 deploy.log
+            
+            exit 1
+          fi
+
+      - name: 📊 Post-Deployment Status
+        if: always() && steps.should_deploy_service.outputs.should_deploy == 'true'
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 Deployment Status for: ${{ matrix.app_name }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          # Show current status
+          flyctl status -a ${{ matrix.app_name }} || true
+          
+          echo ""
+          echo "📈 Recent Activity (last 30 lines):"
+          flyctl logs -a ${{ matrix.app_name }} --no-tail -n 30 || true
+          
+          # Show deployment metrics if successful
+          if [ "${{ steps.deploy.outputs.success }}" == "true" ]; then
+            echo ""
+            echo "✅ Deployment Metrics:"
+            echo "  - Duration: ${{ steps.deploy.outputs.duration }}s"
+            echo "  - Version: v${{ steps.deploy.outputs.version }}"
+            echo "  - Commit: ${{ github.sha }}"
+            echo "  - Image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:sha-${{ github.sha }}"
+          fi
+
+      - name: Report Service Skipped
+        if: steps.should_deploy_service.outputs.should_deploy == 'false'
+        run: |
+          echo "⏭️  ${{ matrix.service }} deployment skipped - no changes detected"
+          echo "::notice::Service ${{ matrix.service }} skipped (no changes)"
+
+      - name: Notify Deployment Status
+        if: steps.should_deploy_service.outputs.should_deploy == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ steps.deploy.outputs.success }}' === 'true' ? '✅' : '❌';
+            const duration = '${{ steps.deploy.outputs.duration }}' || 'N/A';
+            const version = '${{ steps.deploy.outputs.version }}' || 'unknown';
+            
+            let message = `${status} **${{ matrix.service }}** deployment to Fly.io ${status === '✅' ? 'succeeded' : 'failed'}`;
+            
+            if (status === '✅') {
+              message += `\n\n**Metrics:**\n- ⏱️ Duration: ${duration}s\n- 📦 Version: v${version}\n- 🔗 App: \`${{ matrix.app_name }}\``;
+            }
+
+            if ('${{ github.event_name }}' === 'pull_request') {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: message
+              });
+            }
+
+  verify:
+    name: ✅ Verify Deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [deploy]
+    if: success()
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Wait for Services to Stabilize
+        run: |
+          echo "Waiting 30 seconds for services to stabilize..."
+          sleep 30
+
+      - name: 🌐 Verify Phoenix UI
+        run: |
+          echo "🔍 Verifying Phoenix UI..."
+
+          # Check machine status
+          flyctl status -a ${{ env.PHOENIX_UI_APP }}
+
+          # Health check with retries
+          echo "💚 Health Check: https://aerophoenix.fly.dev/health"
+          for i in {1..5}; do
+            if curl -sf --max-time 30 "https://aerophoenix.fly.dev/health" > /dev/null; then
+              echo "✅ Phoenix UI health check passed (attempt $i)"
+              break
+            fi
+            if [ $i -eq 5 ]; then
+              echo "❌ Phoenix UI health check failed after 5 attempts"
+              echo "📋 Fetching logs for debugging..."
+              flyctl logs -a ${{ env.PHOENIX_UI_APP }} --no-tail -n 50
+              exit 1
+            fi
+            echo "  ⏳ Retrying in 10 seconds... ($i/5)"
+            sleep 10
+          done
+
+      - name: Verify Orchestrator
+        run: |
+          echo "Verifying Orchestrator..."
+          flyctl status -a ${{ env.ORCHESTRATOR_APP }}
+
+          # Internal health check via Fly proxy
+          flyctl ssh console -a ${{ env.ORCHESTRATOR_APP }} -C "curl -sf http://localhost:4001/api/v1/ping" || echo "Internal check skipped"
+
+      - name: Verify flyd-sim
+        run: |
+          echo "Verifying flyd-sim..."
+          flyctl status -a ${{ env.FLYD_SIM_APP }}
+
+      - name: Verify net-sim
+        run: |
+          echo "Verifying net-sim..."
+          flyctl status -a ${{ env.NET_SIM_APP }}
+
+      - name: Check Suspend Mode Configuration
+        run: |
+          echo "Checking suspend mode configuration..."
+
+          for app in ${{ env.PHOENIX_UI_APP }} ${{ env.ORCHESTRATOR_APP }} ${{ env.FLYD_SIM_APP }} ${{ env.NET_SIM_APP }}; do
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "App: $app"
+            flyctl config show -a $app | grep -E "(auto_stop|auto_start|min_machines)" || true
+            echo ""
+          done
+
+      - name: Generate Deployment Report
+        run: |
+          echo "# Deployment Report" > deployment-report.md
+          echo "" >> deployment-report.md
+          echo "**Deployment Time:** $(date -u)" >> deployment-report.md
+          echo "**Git SHA:** ${{ github.sha }}" >> deployment-report.md
+          echo "**Git Ref:** ${{ github.ref_name }}" >> deployment-report.md
+          echo "" >> deployment-report.md
+          echo "## Services Status" >> deployment-report.md
+          echo "" >> deployment-report.md
+
+          for app in phoenix-ui orchestrator flyd-sim net-sim; do
+            echo "### $app" >> deployment-report.md
+            echo '```' >> deployment-report.md
+            flyctl status -a aerophoenix-${app/phoenix-ui/ui} 2>/dev/null || echo "Status unavailable"
+            echo '```' >> deployment-report.md
+            echo "" >> deployment-report.md
+          done
+
+          cat deployment-report.md
+
+      - name: Upload Deployment Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-report
+          path: deployment-report.md
+          retention-days: 30
+
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [deploy, verify]
+    if: failure() && (needs.deploy.result == 'failure' || needs.verify.result == 'failure')
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Rollback Services
+        run: |
+          echo "🔄 Rolling back failed deployment..."
+          echo ""
+
+          ROLLBACK_FAILED=0
+
+          for app in ${{ env.PHOENIX_UI_APP }} ${{ env.ORCHESTRATOR_APP }} ${{ env.FLYD_SIM_APP }} ${{ env.NET_SIM_APP }}; do
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🔍 Checking rollback options for: $app"
+
+            # Get release history
+            RELEASES=$(flyctl releases -a $app --json 2>/dev/null || echo "[]")
+            RELEASE_COUNT=$(echo "$RELEASES" | jq 'length')
+
+            echo "📊 Found $RELEASE_COUNT releases for $app"
+
+            if [ "$RELEASE_COUNT" -le 1 ]; then
+              echo "⚠️  This is the first deployment for $app"
+              echo "⚠️  No previous version to rollback to"
+              echo "💡 Suggestion: Scale app to zero or destroy it manually"
+              echo ""
+              echo "   flyctl scale count 0 -a $app"
+              echo "   # or"
+              echo "   flyctl apps destroy $app"
+              echo ""
+              continue
+            fi
+
+            # Get previous stable release (skip current failed one)
+            PREVIOUS=$(echo "$RELEASES" | jq -r '.[1].version // empty')
+            PREVIOUS_STATUS=$(echo "$RELEASES" | jq -r '.[1].status // empty')
+
+            if [ -n "$PREVIOUS" ]; then
+              echo "📌 Previous release: v$PREVIOUS (Status: $PREVIOUS_STATUS)"
+              echo "🔄 Attempting rollback..."
+
+              if flyctl releases rollback -a $app --version $PREVIOUS --yes 2>&1 | tee rollback.log; then
+                echo "✅ Successfully rolled back $app to version $PREVIOUS"
+                
+                # Verify rollback
+                sleep 5
+                if flyctl status -a $app 2>/dev/null | grep -q "running"; then
+                  echo "✅ Verified: $app is running after rollback"
+                else
+                  echo "⚠️  Warning: $app may not be fully operational after rollback"
+                  ROLLBACK_FAILED=1
+                fi
+              else
+                echo "❌ Rollback failed for $app"
+                cat rollback.log || true
+                ROLLBACK_FAILED=1
+              fi
+            else
+              echo "❌ Could not determine previous version for $app"
+              ROLLBACK_FAILED=1
+            fi
+            echo ""
+          done
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ $ROLLBACK_FAILED -eq 0 ]; then
+            echo "✅ All rollbacks completed successfully"
+          else
+            echo "⚠️  Some rollbacks failed or were skipped"
+            echo "📝 Manual intervention may be required"
+          fi
+
+      - name: Notify Rollback
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const message = `**Deployment Failed** - Automatic rollback initiated for commit ${{ github.sha }}`;
+
+            // Create an issue for failed deployment
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deployment Failed: ${context.sha.substring(0, 7)}`,
+              body: `## Deployment Failure
+
+            **Commit:** ${{ github.sha }}
+            **Branch:** ${{ github.ref_name }}
+            **Workflow Run:** [View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ### Action Taken
+            - Automatic rollback to previous release was attempted
+
+            ### Next Steps
+            1. Check the workflow logs for error details
+            2. Fix the issue in the code
+            3. Push a new commit to trigger re-deployment
+
+            cc: @${{ github.actor }}`,
+              labels: ['deployment-failure', 'high-priority']
+            });
+
+  cleanup:
+    name: 🧹 Cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [preflight, build-images, deploy, verify]
+    if: always()
+
+    strategy:
+      matrix:
+        package: [phoenix-ui, orchestrator, flyd-sim, net-sim]
+
+    steps:
+      - name: Cleanup Old Docker Images
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: aerophoenix/${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: 10
+          delete-only-untagged-versions: true
+        continue-on-error: true
+
+      - name: Summary
+        run: |
+          echo "## CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Pre-flight | ${{ needs.preflight.result || 'Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Images | ${{ needs.build-images.result || 'Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy | ${{ needs.deploy.result || 'Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Verify | ${{ needs.verify.result || 'Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** [${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [preflight, build-images, deploy, verify]
+    if: always() && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Create GitHub Deployment Status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deploySuccess = '${{ needs.deploy.result }}' === 'success';
+            const verifySuccess = '${{ needs.verify.result }}' === 'success';
+            const overallSuccess = deploySuccess && verifySuccess;
+
+            const state = overallSuccess ? 'success' : 
+                          '${{ needs.deploy.result }}' === 'skipped' ? 'inactive' : 'failure';
+
+            // Create deployment status
+            try {
+              const deployment = await github.rest.repos.createDeployment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: context.sha,
+                environment: 'production',
+                auto_merge: false,
+                required_contexts: [],
+                description: `Deployment from ${context.sha.substring(0, 7)}`
+              });
+
+              await github.rest.repos.createDeploymentStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deployment.data.id,
+                state: state,
+                environment_url: 'https://aerophoenix.fly.dev',
+                description: overallSuccess ? 'Deployment successful' : 'Deployment failed or skipped'
+              });
+            } catch (e) {
+              console.log('Deployment status creation skipped:', e.message);
+            }
+
+            // Summary comment for PRs
+            if (context.eventName === 'pull_request') {
+              const emoji = overallSuccess ? '✅' : '❌';
+              const body = `## ${emoji} CI/CD Pipeline Results
+
+            | Job | Status |
+            |-----|--------|
+            | Pre-flight | ${{ needs.preflight.result }} |
+            | Build | ${{ needs.build-images.result }} |
+            | Deploy | ${{ needs.deploy.result }} |
+            | Verify | ${{ needs.verify.result }} |
+
+            **Commit:** \`${{ github.sha }}\`
+            **Actor:** @${{ github.actor }}`;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }

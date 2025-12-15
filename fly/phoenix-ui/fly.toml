@@ -1,0 +1,64 @@
+app = "aerophoenix"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+swap_size_mb = 0
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PHX_SERVER = "true"
+  PHX_HOST = "aerophoenix.fly.dev"
+  MIX_ENV = "prod"
+  ECTO_IPV6 = "true"
+  ERL_AFLAGS = "-proto_dist inet6_tcp"
+  ORCHESTRATOR_URL = "http://aerophoenix-orchestrator.internal:4001"
+  FLYD_SIM_URL = "http://aerophoenix-flyd-sim.internal:8080"
+  PHX_TOPOLOGY_REFRESH_MS = "5000"
+  ELIXIR_ERL_OPTIONS = "+sbwt none +sbwtdcpu none +sbwtdio none"
+  RELEASE_DISTRIBUTION = "name"
+  RELEASE_NODE = "phoenix_ui@${FLY_ALLOC_ID}.vm.${FLY_APP_NAME}.internal"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+
+  processes = ["app"]
+
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 250
+
+  [http_service.machine_pool]
+    acquire_timeout = "30s"
+
+[[http_service.checks]]
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "30s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[processes]
+  app = "/app/bin/phoenix_ui start"
+
+[[statics]]
+  guest_path = "/app/lib/phoenix_ui-0.1.0/priv/static"
+  url_prefix = "/assets"
+
+[deploy]
+  strategy = "rolling"
+
+[metrics]
+  port = 9569
+  path = "/metrics"

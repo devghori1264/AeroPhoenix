@@ -23,5 +23,26 @@ if config_env() == :prod do
       ip: {0, 0, 0, 0, 0, 0, 0, 0},
       port: port
     ],
-    secret_key_base: secret_key_base
+    secret_key_base: secret_key_base,
+    check_origin: [
+      "https://#{host}",
+      "https://aerophoenix.fly.dev",
+      "//#{host}",
+      "//aerophoenix.fly.dev"
+    ]
+
+  orchestrator_url = System.get_env("ORCHESTRATOR_URL") || "http://localhost:4001"
+  orchestrator_timeout = String.to_integer(System.get_env("ORCHESTRATOR_TIMEOUT") || "5000")
+  orchestrator_token = System.get_env("ORCHESTRATOR_TOKEN") || "dev-token"
+
+  config :phoenix_ui, PhoenixUiWeb.OrchestratorClient,
+    base_url: orchestrator_url,
+    request_timeout: orchestrator_timeout,
+    token: orchestrator_token
+
+  flyd_url = System.get_env("FLYD_SIM_URL") || "http://localhost:8080"
+  config :phoenix_ui, :flyd_base, flyd_url
+
+  topology_refresh = String.to_integer(System.get_env("PHX_TOPOLOGY_REFRESH_MS") || "5000")
+  config :phoenix_ui, :topology, refresh_interval_ms: topology_refresh
 end

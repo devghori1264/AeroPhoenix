@@ -1,6 +1,7 @@
 import Config
 
 config :phoenix_ui, PhoenixUiWeb.Endpoint,
+  server: true,
   cache_static_manifest: "priv/static/cache_manifest.json"
 
 config :swoosh, api_client: Swoosh.ApiClient.Req

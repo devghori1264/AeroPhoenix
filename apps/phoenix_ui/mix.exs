@@ -10,6 +10,7 @@ defmodule PhoenixUi.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
     ]
@@ -78,7 +79,7 @@ defmodule PhoenixUi.MixProject do
       {:opentelemetry_exporter, "~> 1.0"},
       {:gnat, "~> 1.6"},
       {:gun, "~> 2.1", override: true},
-      {:orchestrator, path: "../orchestrator"}
+      {:orchestrator, path: "../orchestrator", runtime: false}
     ]
   end
 
@@ -93,6 +94,22 @@ defmodule PhoenixUi.MixProject do
         "phx.digest"
       ],
       precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]
+    ]
+  end
+
+  defp releases do
+    [
+      phoenix_ui: [
+        include_executables_for: [:unix],
+        applications: [
+          runtime_tools: :permanent,
+          orchestrator: :none
+        ],
+        steps: [:assemble, :tar],
+        cookie: "aerophoenix_phoenix_ui_cookie",
+        strip_beams: Mix.env() == :prod,
+        validate_compile_env: false
+      ]
     ]
   end
 end

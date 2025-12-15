@@ -46,7 +46,7 @@ defmodule Orchestrator.Application do
   end
 
   defp prometheus_metrics do
-    if Mix.env() == :test do
+    if Application.get_env(:orchestrator, :env) == :test do
       []
     else
       [
@@ -57,7 +57,7 @@ defmodule Orchestrator.Application do
   end
 
   defp worker_children do
-    if Mix.env() == :test do
+    if Application.get_env(:orchestrator, :env) == :test do
       []
     else
       [Orchestrator.Reconciliation.Engine]
@@ -73,8 +73,8 @@ defmodule Orchestrator.Application do
   defp telemetry_port, do: String.to_integer(System.get_env("TELEMETRY_PORT", "9569"))
 
   defp cluster_size do
-    default = if Mix.env() in [:dev, :test], do: "1", else: "3"
-    System.get_env("CLUSTER_SIZE", default) |> String.to_integer()
+
+    System.get_env("CLUSTER_SIZE", "1") |> String.to_integer()
   end
 
   defp region_id do

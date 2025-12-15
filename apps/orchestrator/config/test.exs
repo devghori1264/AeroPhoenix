@@ -11,9 +11,7 @@ config :orchestrator, Orchestrator.Repo,
   show_sensitive_data_on_connection_error: false,
   log: false,
   ownership_timeout: 240_000,
-  timeout: 240_000,
-  queue_target: 50,
-  queue_interval: 1000
+  timeout: 240_000
 
 config :logger, level: :info
 config :logger, :console, level: :warning

@@ -1,12 +1,13 @@
 import Config
 
+config :orchestrator, :env, :prod
+
 config :orchestrator, Orchestrator.Repo,
   pool_size: 10,
-  ssl: false,
   show_sensitive_data_on_connection_error: false
 
 config :orchestrator, OrchestratorWeb.Endpoint,
-  http: [port: 4000],
+  http: [port: 4001],
   server: true,
   check_origin: false,
   render_errors: [
@@ -26,7 +27,7 @@ config :orchestrator, Oban,
      ]}
   ]
 
-config :logger, level: :warning
+config :logger, level: :info
 
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",

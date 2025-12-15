@@ -1,0 +1,70 @@
+app = "aerophoenix-flyd-sim"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+swap_size_mb = 0
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  GRPC_PORT = "50051"
+  HTTP_PORT = "8080"
+  METRICS_PORT = "9090"
+  NATS_URL = "nats://aerophoenix-nats.internal:4222"
+  MACHINE_CAPACITY = "100"
+  REGION_LATENCY_BASE_MS = "0"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  processes = ["app"]
+
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 50
+    hard_limit = 100
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
+  method = "GET"
+  path = "/ping"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 50051
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 50051
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 9090
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 9090
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[processes]
+  app = "/bin/flyd-sim --db /data/badger"
+
+[mounts]
+  source = "flyd_sim_data"
+  destination = "/data"
+  initial_size = "5gb"
+
+[metrics]
+  port = 9090
+  path = "/metrics"

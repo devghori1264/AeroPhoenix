@@ -9,7 +9,7 @@ defmodule PhoenixUiWeb.HolodeckLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Orchestrator.PubSub, "holodeck:events")
+      Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "holodeck:events")
 
       Process.send_after(self(), :update_metrics, @metrics_update_interval)
     end

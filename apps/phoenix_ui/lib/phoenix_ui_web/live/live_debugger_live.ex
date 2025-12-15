@@ -5,7 +5,7 @@ defmodule PhoenixUiWeb.LiveDebuggerLive do
   @impl true
   def mount(%{"machine_id" => machine_id}, _session, socket) do
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(Orchestrator.PubSub, "pty:#{machine_id}")
+      Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "pty:#{machine_id}")
 
       case start_pty_session(machine_id, self()) do
         {:ok, pty_pid} ->

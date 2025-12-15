@@ -1,5 +1,7 @@
 import Config
 
+config :orchestrator, :env, :dev
+
 config :orchestrator, Orchestrator.Repo,
   username: System.get_env("POSTGRES_USER", "aerouser"),
   password: System.get_env("POSTGRES_PASSWORD", "aeropass"),
