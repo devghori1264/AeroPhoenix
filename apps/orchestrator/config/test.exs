@@ -52,4 +52,4 @@ config :orchestrator, :resource_manager,
   disk_mb: 10_000_000,
   leak_scan_interval_ms: 100
 
-config :orchestrator, :reconciler_interval, 100
+config :orchestrator, :reconciler_interval, 3_600_000
