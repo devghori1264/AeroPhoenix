@@ -3,14 +3,14 @@ defmodule Orchestrator.Repo.Migrations.CreateReconciliationAuditLogs do
 
   def change do
     create table(:reconciliation_audit_logs, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
+      add(:id, :uuid, primary_key: true)
       add(:machine_id, :string, null: false)
       add(:event_type, :string, null: false)
       add(:severity, :string, null: false)
       add(:success, :boolean, null: false, default: false)
 
       add(:duration_ms, :integer)
-      add(:details, :map, default: %{})
+      add(:details, :map)
 
       # Reconciliation-specific fields
       add(:reconciliation_level, :string)

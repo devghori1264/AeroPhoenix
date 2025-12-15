@@ -3,7 +3,7 @@ defmodule Orchestrator.Repo.Migrations.CreateMachinesAndEvents do
 
   def change do
     create table(:machines, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
+      add(:id, :uuid, primary_key: true)
       add(:name, :string, null: false)
       add(:region, :string, null: false)
       add(:status, :string, null: false)
@@ -11,7 +11,7 @@ defmodule Orchestrator.Repo.Migrations.CreateMachinesAndEvents do
       add(:cpu, :float, default: 0.0)
       add(:memory_mb, :integer, default: 0)
       add(:latency_ms, :float, default: 0.0)
-      add(:metadata, :map, default: %{})
+      add(:metadata, :map)
       add(:last_seen_at, :utc_datetime_usec)
       timestamps(type: :utc_datetime_usec)
     end
@@ -20,10 +20,10 @@ defmodule Orchestrator.Repo.Migrations.CreateMachinesAndEvents do
     create(index(:machines, [:status]))
 
     create table(:machine_events, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("gen_random_uuid()"))
+      add(:id, :uuid, primary_key: true)
       add(:machine_id, references(:machines, type: :uuid, on_delete: :delete_all), null: false)
       add(:type, :string, null: false)
-      add(:payload, :map, default: %{})
+      add(:payload, :map)
       add(:created_at, :utc_datetime_usec, null: false)
     end
 

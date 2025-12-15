@@ -6,8 +6,8 @@ defmodule Orchestrator.Repo.Migrations.UpdateMachinesTable do
       add :machine_type, :string
       add :service, :string
       add :cpu_count, :integer, default: 1
-      add :config, :map, default: %{}
-      add :tags, :map, default: %{}
+      add :config, :map
+      add :tags, :map
     end
 
     create index(:machines, [:service])
