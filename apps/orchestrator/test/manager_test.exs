@@ -8,10 +8,13 @@ defmodule Orchestrator.ManagerTest do
 
   test "create machine persists and calls remote" do
     bypass = Bypass.open(port: 8081)
-    
+
     # Override region endpoints to point to the local Bypass instance
     original_endpoints = Application.get_env(:orchestrator, :region_endpoints)
-    Application.put_env(:orchestrator, :region_endpoints, %{"eu-west-1" => "http://localhost:8081"})
+
+    Application.put_env(:orchestrator, :region_endpoints, %{
+      "eu-west-1" => "http://localhost:8081"
+    })
 
     on_exit(fn ->
       if original_endpoints do
