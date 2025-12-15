@@ -1043,6 +1043,18 @@ jobs:
         if: steps.should_deploy_service.outputs.should_deploy == 'true'
         uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: Configure Registry Access
+        if: steps.should_deploy_service.outputs.should_deploy == 'true'
+        run: |
+          echo "Configuring Fly.io to access GHCR..."
+          flyctl secrets set \
+            FLY_REGISTRY_HOST=ghcr.io \
+            FLY_REGISTRY_USERNAME=${{ github.actor }} \
+            FLY_REGISTRY_PASSWORD=${{ secrets.GH_PAT }} \
+            -a ${{ matrix.app_name }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
       - name: Check Fly.io App Status
         if: steps.should_deploy_service.outputs.should_deploy == 'true'
         id: status
@@ -1074,9 +1086,6 @@ jobs:
         id: deploy
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          FLY_REGISTRY_HOST: ghcr.io
-          FLY_REGISTRY_USERNAME: ${{ github.actor }}
-          FLY_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd ${{ matrix.working_dir }}
           
