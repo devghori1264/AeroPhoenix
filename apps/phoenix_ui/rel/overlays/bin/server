@@ -1,0 +1,12 @@
+#!/bin/sh
+# =============================================================================
+# AeroPhoenix Phoenix UI - Server Start Script
+# =============================================================================
+# This script is the entrypoint for the production release.
+# It configures the runtime environment and starts the Phoenix server.
+# =============================================================================
+
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+PHX_SERVER=true exec ./phoenix_ui start

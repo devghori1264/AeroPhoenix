@@ -32,4 +32,3 @@ apps/phoenix_ui/priv/static/cache_manifest.json
 .vscode
 *.aegis.bak
 apps/orchestrator/bin/flyd-sim
-apps/phoenix_ui/rel

@@ -1,0 +1,17 @@
+#!/bin/sh
+# =============================================================================
+# AeroPhoenix Phoenix UI - Migration Script
+# =============================================================================
+# Runs database migrations during deployment.
+# =============================================================================
+
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+# Run migrations (if using Ecto)
+# The Phoenix UI may not have its own database, but if it does:
+# exec ./phoenix_ui eval "PhoenixUi.Release.migrate"
+
+# For now, just verify the release boots correctly
+exec ./phoenix_ui eval "IO.puts(\"Release ready\")"
