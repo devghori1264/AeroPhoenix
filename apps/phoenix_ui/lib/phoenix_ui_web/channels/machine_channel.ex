@@ -27,7 +27,7 @@ defmodule PhoenixUiWeb.MachineChannel do
           batches_sent: 0
         })
 
-      Phoenix.PubSub.subscribe(PhoenixUi.PubSub, "machine_logs:#{machine_id}")
+      Phoenix.PubSub.subscribe(Orchestrator.PubSub, "machine_logs:#{machine_id}")
 
       schedule_batch_send()
 
