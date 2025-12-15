@@ -198,6 +198,7 @@ defmodule Orchestrator.Migration.MigrationCoordinatorTest do
                MigrationCoordinator.migrate_machine("machine_invalid_1", [])
     end
   end
+
   def handle_telemetry(event, measurements, metadata, test_pid) do
     send(test_pid, {:telemetry_event, event, measurements, metadata})
   end

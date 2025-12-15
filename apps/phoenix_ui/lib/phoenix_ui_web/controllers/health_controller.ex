@@ -27,16 +27,19 @@ defmodule PhoenixUiWeb.HealthController do
     |> json(%{
       status: if(all_healthy, do: "ready", else: "degraded"),
       service: "phoenix_ui",
-      checks: Map.new(checks, fn {name, status} ->
-        {name, %{status: to_string(status)}}
-      end),
+      checks:
+        Map.new(checks, fn {name, status} ->
+          {name, %{status: to_string(status)}}
+        end),
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
     })
   end
 
   defp check_pubsub do
     case Process.whereis(PhoenixUi.PubSub) do
-      nil -> :error
+      nil ->
+        :error
+
       pid when is_pid(pid) ->
         if Process.alive?(pid), do: :ok, else: :error
     end
@@ -48,21 +51,25 @@ defmodule PhoenixUiWeb.HealthController do
       PhoenixUiWeb.Endpoint
     ]
 
-    all_alive = Enum.all?(required_processes, fn name ->
-      case Process.whereis(name) do
-        nil -> false
-        pid -> Process.alive?(pid)
-      end
-    end)
+    all_alive =
+      Enum.all?(required_processes, fn name ->
+        case Process.whereis(name) do
+          nil -> false
+          pid -> Process.alive?(pid)
+        end
+      end)
 
     if all_alive, do: :ok, else: :error
   end
 
   defp check_orchestrator do
-    orchestrator_url = Application.get_env(:phoenix_ui, PhoenixUiWeb.OrchestratorClient)[:base_url]
+    orchestrator_url =
+      Application.get_env(:phoenix_ui, PhoenixUiWeb.OrchestratorClient)[:base_url]
 
     case orchestrator_url do
-      nil -> :ok
+      nil ->
+        :ok
+
       url ->
         Task.async(fn ->
           case Req.get("#{url}/api/v1/ping", receive_timeout: 2000) do

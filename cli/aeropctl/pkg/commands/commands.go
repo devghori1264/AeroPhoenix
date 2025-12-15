@@ -10,9 +10,9 @@ import (
 	"github.com/briandowns/spinner"
 	"github.com/devghori1264/aerophoenix/cli/aeropctl/pkg/client"
 	"github.com/devghori1264/aerophoenix/cli/aeropctl/pkg/formatter"
+	"github.com/devghori1264/aerophoenix/cli/aeropctl/pkg/logs"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
-	"github.com/devghori1264/aerophoenix/cli/aeropctl/pkg/logs"
 )
 
 type GlobalFlags struct {

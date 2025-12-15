@@ -1,5 +1,4 @@
 defmodule TestGenServer do
-
   def call(pid, request, timeout \\ 1000) do
     GenServer.call(pid, request, timeout)
   end

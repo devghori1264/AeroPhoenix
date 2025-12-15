@@ -149,7 +149,6 @@ defmodule Orchestrator.Migration.MigrationCoordinator do
       :error ->
         {:reply, {:error, :missing_region_options}, state}
     end
-
   end
 
   @impl true

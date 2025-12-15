@@ -27,13 +27,13 @@ defmodule Orchestrator.MachineFSMTest do
   test "start/stop flows call flyd client and persist state", %{bypass: _bypass} do
     id = Ecto.UUID.generate()
 
-
-    {:ok, pid} = MachineFSM.start_link(%{
-      id: id,
-      status: "stopped",
-      region: "us-east-1",
-      machine_type: "shared-cpu-1x"
-    })
+    {:ok, pid} =
+      MachineFSM.start_link(%{
+        id: id,
+        status: "stopped",
+        region: "us-east-1",
+        machine_type: "shared-cpu-1x"
+      })
 
     Process.sleep(50)
 

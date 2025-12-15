@@ -354,5 +354,4 @@ defmodule Orchestrator.LiveMigration.StateTransfer do
   end
 
   defp calculate_throughput(_, _), do: 0.0
-
 end

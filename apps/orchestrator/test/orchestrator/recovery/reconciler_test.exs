@@ -109,7 +109,6 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
       assert is_map(result.drift_report)
       assert is_list(result.repair_results)
       assert is_integer(result.duration_ms)
-
     end
 
     test "repairs detected anomalies automatically" do
@@ -202,7 +201,9 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
   describe "zombie repair strategy" do
     test "resurrects zombie machines" do
       id = Ecto.UUID.generate()
-      {:ok, pid} = MachActorSup.start_machine(id: id, region: "test", name: "test_zombie_resurrection")
+
+      {:ok, pid} =
+        MachActorSup.start_machine(id: id, region: "test", name: "test_zombie_resurrection")
 
       MachineActor.transition(pid, :start)
       Process.sleep(50)
@@ -353,12 +354,14 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
   describe "retry_repair/1" do
     test "manually retries repair for specific machine" do
       id = Ecto.UUID.generate()
-      {:ok, _} = Orchestrator.Repo.insert(%Orchestrator.Machines.Machine{
-        id: id,
-        region: "test",
-        status: "running",
-        name: "test-machine"
-      })
+
+      {:ok, _} =
+        Orchestrator.Repo.insert(%Orchestrator.Machines.Machine{
+          id: id,
+          region: "test",
+          status: "running",
+          name: "test-machine"
+        })
 
       {:ok, pid} = MachActorSup.start_machine(id: id, region: "test")
       MachineActor.transition(pid, :start)
@@ -382,7 +385,9 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
 
     test "returns already_healthy for healthy machines" do
       id = Ecto.UUID.generate()
-      {:ok, _pid} = MachActorSup.start_machine(id: id, region: "test", name: "test_already_healthy")
+
+      {:ok, _pid} =
+        MachActorSup.start_machine(id: id, region: "test", name: "test_already_healthy")
 
       Process.sleep(50)
 
@@ -399,7 +404,10 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
       zombie_ids =
         for i <- 1..15 do
           id = Ecto.UUID.generate()
-          {:ok, pid} = MachActorSup.start_machine(id: id, region: "test", name: "test_concurrent_#{i}")
+
+          {:ok, pid} =
+            MachActorSup.start_machine(id: id, region: "test", name: "test_concurrent_#{i}")
+
           MachineActor.transition(pid, :start)
           Process.sleep(20)
 
@@ -426,8 +434,11 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
       machine_ids =
         for i <- 1..5 do
           id = Ecto.UUID.generate()
+
           case MachActorSup.start_machine(id: id, region: "test", name: "test_perf_recon_#{i}") do
-            {:ok, _pid} -> id
+            {:ok, _pid} ->
+              id
+
             {:error, _} ->
               nil
           end
@@ -461,7 +472,10 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
       )
 
       id = Ecto.UUID.generate()
-      {:ok, pid} = MachActorSup.start_machine(id: id, region: "test", name: "test_telemetry_zombie")
+
+      {:ok, pid} =
+        MachActorSup.start_machine(id: id, region: "test", name: "test_telemetry_zombie")
+
       MachineActor.transition(pid, :start)
       Process.sleep(50)
 
@@ -524,7 +538,10 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
       zombie_ids =
         for i <- 1..10 do
           id = Ecto.UUID.generate()
-          {:ok, pid} = MachActorSup.start_machine(id: id, region: "test", name: "test_mass_zombie_#{i}")
+
+          {:ok, pid} =
+            MachActorSup.start_machine(id: id, region: "test", name: "test_mass_zombie_#{i}")
+
           MachineActor.transition(pid, :start)
           Process.sleep(20)
 

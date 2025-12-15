@@ -289,7 +289,8 @@ defmodule Orchestrator.Recovery.DriftDetectorTest do
     end
 
     test "returns :not_found for non-existent machine", %{data_dir: data_dir} do
-      assert {:error, :not_found} = DriftDetector.check_machine("nonexistent_id", data_dir: data_dir)
+      assert {:error, :not_found} =
+               DriftDetector.check_machine("nonexistent_id", data_dir: data_dir)
     end
 
     test "detects zombie for individual machine", %{data_dir: data_dir} do
@@ -346,6 +347,7 @@ defmodule Orchestrator.Recovery.DriftDetectorTest do
       machine_ids =
         for i <- 1..10 do
           id = "test_perf_#{i}"
+
           case MachActorSup.start_machine(id: id, region: "test") do
             {:ok, _pid} -> id
             {:error, _} -> nil
@@ -383,6 +385,7 @@ defmodule Orchestrator.Recovery.DriftDetectorTest do
       machine_ids =
         for i <- 1..8 do
           id = "test_parallel_#{i}"
+
           case MachActorSup.start_machine(id: id, region: "test") do
             {:ok, _pid} -> id
             {:error, _} -> nil
@@ -569,12 +572,13 @@ defmodule Orchestrator.Recovery.DriftDetectorTest do
   end
 
   defp cleanup_machine_data(id, data_dir \\ nil) do
-    path = if data_dir do
-      get_db_path(id, data_dir)
-    else
-      default_dir = Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
-      Path.join(default_dir, "#{id}.db")
-    end
+    path =
+      if data_dir do
+        get_db_path(id, data_dir)
+      else
+        default_dir = Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
+        Path.join(default_dir, "#{id}.db")
+      end
 
     if File.exists?(path) do
       File.rm(path)

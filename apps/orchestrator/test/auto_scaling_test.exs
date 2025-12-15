@@ -44,6 +44,7 @@ defmodule Orchestrator.AutoScalingTest do
     if pid = Process.whereis(AutoScaler) do
       Process.exit(pid, :kill)
       ref = Process.monitor(pid)
+
       receive do
         {:DOWN, ^ref, _, _, _} -> :ok
       end
@@ -80,7 +81,6 @@ defmodule Orchestrator.AutoScalingTest do
   end
 
   describe "AutoScaler operations" do
-
     test "creates scaling policy via AutoScaler", %{scaler: scaler} do
       policy_attrs = %{
         service_name: "new-service",
@@ -104,7 +104,14 @@ defmodule Orchestrator.AutoScalingTest do
       result = AutoScaler.evaluate_scaling(scaler, policy.service_name)
 
       assert Map.has_key?(result, :action)
-      assert result[:action] in [:scale_out, :scale_in, :no_action, :prevented_by_cooldown, :no_change]
+
+      assert result[:action] in [
+               :scale_out,
+               :scale_in,
+               :no_action,
+               :prevented_by_cooldown,
+               :no_change
+             ]
     end
 
     test "evaluates scaling decision - predictive strategy", %{scaler: scaler} do
@@ -136,7 +143,11 @@ defmodule Orchestrator.AutoScalingTest do
       assert Map.has_key?(result, :predictions) || Map.has_key?(result, :action)
     end
 
-    test "prevents rapid scaling with cooldown", %{scaler: scaler, policy: policy, machine: _machine} do
+    test "prevents rapid scaling with cooldown", %{
+      scaler: scaler,
+      policy: policy,
+      machine: _machine
+    } do
       {:ok, _decision1} = AutoScaler.scale_now(scaler, policy.service_name, :scale_out, 1)
       {:ok, decision2} = AutoScaler.scale_now(scaler, policy.service_name, :scale_out, 1)
 

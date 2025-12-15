@@ -221,10 +221,14 @@ defmodule Orchestrator.Recovery.RepairActions do
           machine_id: machine_id,
           pid: inspect(pid)
         )
+
         verify_resurrection(machine_id, pid, anomaly)
 
       {:error, :no_persisted_state} ->
-        Logger.warning("Zombie resurrection missing metadata, using fallback", machine_id: machine_id)
+        Logger.warning("Zombie resurrection missing metadata, using fallback",
+          machine_id: machine_id
+        )
+
         fallback_resurrect(machine_id, anomaly)
 
       {:error, reason} ->
@@ -232,6 +236,7 @@ defmodule Orchestrator.Recovery.RepairActions do
           machine_id: machine_id,
           reason: inspect(reason)
         )
+
         {:error, reason}
     end
   end
@@ -253,12 +258,14 @@ defmodule Orchestrator.Recovery.RepairActions do
           machine_id: machine_id,
           pid: inspect(pid)
         )
+
         verify_resurrection(machine_id, pid, anomaly)
 
       {:error, :already_exists} ->
         Logger.info("Zombie resurrection race - already started",
           machine_id: machine_id
         )
+
         {:ok, :already_healthy}
 
       {:error, reason} ->
@@ -266,6 +273,7 @@ defmodule Orchestrator.Recovery.RepairActions do
           machine_id: machine_id,
           reason: inspect(reason)
         )
+
         {:error, reason}
     end
   end
@@ -281,6 +289,7 @@ defmodule Orchestrator.Recovery.RepairActions do
             recovered_state: state,
             db_state: anomaly.db_state
           )
+
           {:ok, :repaired}
 
         _ ->
@@ -290,6 +299,7 @@ defmodule Orchestrator.Recovery.RepairActions do
       Logger.info("Zombie resurrection failed - process died immediately",
         machine_id: machine_id
       )
+
       {:error, :immediate_crash}
     end
   end

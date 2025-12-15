@@ -341,11 +341,13 @@ defmodule Orchestrator.Testing.HolodeckTest do
       test_pid = self()
 
       case Process.whereis(Orchestrator.ResourceManager) do
-        nil -> :ok
+        nil ->
+          :ok
+
         _pid ->
-           Supervisor.terminate_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
-           Supervisor.restart_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
-           wait_until(fn -> Process.whereis(Orchestrator.ResourceManager) != nil end)
+          Supervisor.terminate_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
+          Supervisor.restart_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
+          wait_until(fn -> Process.whereis(Orchestrator.ResourceManager) != nil end)
       end
 
       :telemetry.attach_many(

@@ -7,6 +7,7 @@ defmodule Orchestrator.Metrics.LatencyTrackerTest do
     try do
       :ets.delete_all_objects(:latency_histograms)
       :ets.delete_all_objects(:latency_windows)
+
       if :ets.info(:hedged_request_metrics) != :undefined do
         :ets.delete_all_objects(:hedged_request_metrics)
       end

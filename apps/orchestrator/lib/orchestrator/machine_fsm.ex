@@ -854,11 +854,13 @@ defmodule Orchestrator.MachineFSM do
         is_nil(payload) -> %{}
         true -> %{value: inspect(payload)}
       end
+
     case Repo.get(Machine, machine_id) do
       nil ->
         Logger.warning("Cannot persist event: machine #{machine_id} not found in DB",
           event_type: type
         )
+
         :ok
 
       _machine ->

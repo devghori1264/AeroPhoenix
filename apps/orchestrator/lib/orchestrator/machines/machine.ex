@@ -9,25 +9,25 @@ defmodule Orchestrator.Machines.Machine do
   @timestamps_opts [type: :utc_datetime_usec]
 
   @derive {Jason.Encoder,
-            only: [
-              :id,
-              :name,
-              :region,
-              :status,
-              :machine_type,
-              :cpu,
-              :cpu_count,
-              :memory_mb,
-              :latency_ms,
-              :service,
-              :config,
-              :tags,
-              :version,
-              :metadata,
-              :last_seen_at,
-              :inserted_at,
-              :updated_at
-            ]}
+           only: [
+             :id,
+             :name,
+             :region,
+             :status,
+             :machine_type,
+             :cpu,
+             :cpu_count,
+             :memory_mb,
+             :latency_ms,
+             :service,
+             :config,
+             :tags,
+             :version,
+             :metadata,
+             :last_seen_at,
+             :inserted_at,
+             :updated_at
+           ]}
 
   schema "machines" do
     field(:name, :string)

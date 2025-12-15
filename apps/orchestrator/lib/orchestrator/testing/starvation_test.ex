@@ -19,12 +19,14 @@ defmodule Orchestrator.Testing.StarvationTest do
     GenServer.call(server, {:set_capacity, region, capacity})
   end
 
-  @spec fill_to_capacity(GenServer.server(), region(), capacity()) :: {:ok, [machine_id()]} | {:error, term()}
+  @spec fill_to_capacity(GenServer.server(), region(), capacity()) ::
+          {:ok, [machine_id()]} | {:error, term()}
   def fill_to_capacity(server \\ __MODULE__, region, target) do
     GenServer.call(server, {:fill_to_capacity, region, target}, :infinity)
   end
 
-  @spec test_starvation(GenServer.server(), region()) :: {:ok, machine_id()} | {:error, :insufficient_capacity}
+  @spec test_starvation(GenServer.server(), region()) ::
+          {:ok, machine_id()} | {:error, :insufficient_capacity}
   def test_starvation(server \\ __MODULE__, region) do
     GenServer.call(server, {:test_starvation, region})
   end
@@ -152,8 +154,6 @@ defmodule Orchestrator.Testing.StarvationTest do
         {:reply, {:error, :insufficient_capacity}, state}
     end
   end
-
-
 
   @impl true
   def handle_call({:find_available_region, regions}, _from, state) do

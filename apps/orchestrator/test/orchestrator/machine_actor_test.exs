@@ -15,19 +15,20 @@ defmodule Orchestrator.MachineActorTest do
 
     on_exit(fn ->
       Supervisor.list_machines()
-      |> Enum.each(fn id -> 
+      |> Enum.each(fn id ->
         try do
           Supervisor.stop_machine(id)
         rescue
           _ -> :ok
         end
       end)
+
       Enum.reduce_while(1..5, :error, fn _, _ ->
         try do
           File.rm_rf!(data_dir)
           {:halt, :ok}
         rescue
-          _ -> 
+          _ ->
             Process.sleep(100)
             {:cont, :error}
         end

@@ -5,7 +5,6 @@ defmodule Orchestrator.LiveMigrationTest do
   @moduletag :capture_log
   @moduletag timeout: 120_000
 
-
   alias Orchestrator.LiveMigration.{Coordinator, Checkpointer, StateTransfer, Cutover}
 
   setup do
@@ -21,11 +20,13 @@ defmodule Orchestrator.LiveMigrationTest do
     on_exit(fn ->
       try do
         machines = Agent.get(:test_machines, & &1)
+
         Enum.each(machines, fn pid ->
           if Process.alive?(pid) do
             DynamicSupervisor.terminate_child(Orchestrator.MachineManager, pid)
           end
         end)
+
         Agent.stop(:test_machines)
       catch
         :exit, _ -> :ok
@@ -45,7 +46,9 @@ defmodule Orchestrator.LiveMigrationTest do
       {:error, :timeout}
     else
       case Registry.lookup(Orchestrator.FSMRegistry, machine_id) do
-        [{_pid, _}] -> :ok
+        [{_pid, _}] ->
+          :ok
+
         [] ->
           Process.sleep(10)
           do_wait_for_registered(machine_id, deadline)
@@ -63,8 +66,6 @@ defmodule Orchestrator.LiveMigrationTest do
       config = %{
         strategy: :pre_copy,
         max_iterations: 3,
-
-
         preserve_ip: false,
         sandbox_owner: self()
       }
@@ -111,7 +112,6 @@ defmodule Orchestrator.LiveMigrationTest do
       config = %{
         strategy: :hybrid,
         max_iterations: 5,
-
         preserve_ip: true,
         sandbox_owner: self()
       }
@@ -212,7 +212,10 @@ defmodule Orchestrator.LiveMigrationTest do
       {:ok, base_id, _metadata} = Checkpointer.create_checkpoint(machine_id, region, :full)
 
       {:ok, incr_id, _metadata} =
-        Checkpointer.create_checkpoint(machine_id, region, type: :incremental, base_checkpoint: base_id)
+        Checkpointer.create_checkpoint(machine_id, region,
+          type: :incremental,
+          base_checkpoint: base_id
+        )
 
       assert incr_id != base_id
 
@@ -410,6 +413,7 @@ defmodule Orchestrator.LiveMigrationTest do
         raise "Migration status check failed: #{inspect(reason)}"
     end
   end
+
   defp insert_machine(attrs \\ %{}) do
     default_attrs = %{
       id: Ecto.UUID.generate(),
@@ -425,28 +429,31 @@ defmodule Orchestrator.LiveMigrationTest do
 
     attrs = Map.merge(default_attrs, attrs)
 
-    machine = %Orchestrator.Machines.Machine{}
-    |> Ecto.Changeset.change(attrs)
-    |> Orchestrator.Repo.insert!()
+    machine =
+      %Orchestrator.Machines.Machine{}
+      |> Ecto.Changeset.change(attrs)
+      |> Orchestrator.Repo.insert!()
 
     case Orchestrator.MachineFSM.create_or_update(%{
-      "id" => machine.id,
-      "name" => machine.name,
-      "region" => machine.region,
-      "status" => machine.status,
-      "machine_type" => machine.machine_type,
-      "sandbox_owner" => self()
-    }) do
+           "id" => machine.id,
+           "name" => machine.name,
+           "region" => machine.region,
+           "status" => machine.status,
+           "machine_type" => machine.machine_type,
+           "sandbox_owner" => self()
+         }) do
       {:ok, pid} ->
         Agent.update(:test_machines, fn pids -> [pid | pids] end)
         :ok = wait_for_machine_registered(machine.id)
         machine
+
       {:error, {:already_started, pid}} ->
         Agent.update(:test_machines, fn pids -> [pid | pids] end)
         :ok = wait_for_machine_registered(machine.id)
         machine
     end
   end
+
   defp wait_for_phase(migration_id, phase, retries \\ 50) do
     case Coordinator.get_status(migration_id) do
       {:ok, %{phase: ^phase}} ->

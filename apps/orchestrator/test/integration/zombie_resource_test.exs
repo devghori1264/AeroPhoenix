@@ -23,14 +23,14 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
     if Process.whereis(Orchestrator.Recovery.Reconciler) do
       Supervisor.terminate_child(Orchestrator.Supervisor, Orchestrator.Recovery.Reconciler)
     end
-    
+
     start_supervised!({Orchestrator.Recovery.Reconciler, []})
 
     Reconciler.pause()
 
     on_exit(fn ->
       cleanup_all()
-      
+
       Supervisor.restart_child(Orchestrator.Supervisor, Orchestrator.Recovery.Reconciler)
 
       MachActorSup.list_machines()
@@ -56,11 +56,14 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
     |> Enum.each(fn
       {:undefined, pid, :worker, _} when is_pid(pid) ->
         DynamicSupervisor.terminate_child(MachActorSup, pid)
-      _ -> :ok
+
+      _ ->
+        :ok
     end)
 
     Enum.reduce_while(1..100, 0, fn _i, _acc ->
       count = MachActorSup.count_machines()
+
       if count == 0 do
         {:halt, 0}
       else
@@ -72,6 +75,7 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
       0 ->
         Logger.info("Cleanup successful. Machine count: 0")
         :ok
+
       count ->
         Logger.error("Cleanup failed: #{count} machines still running")
     end
@@ -83,7 +87,13 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
     test "zombie resurrection releases old reservation and creates new one" do
       machine_id = Ecto.UUID.generate()
 
-      {:ok, _} = Orchestrator.Repo.insert(%Machine{id: machine_id, name: "test-" <> machine_id, region: "us-east-1", status: "stopped"})
+      {:ok, _} =
+        Orchestrator.Repo.insert(%Machine{
+          id: machine_id,
+          name: "test-" <> machine_id,
+          region: "us-east-1",
+          status: "stopped"
+        })
 
       {:ok, pid} =
         MachActorSup.start_machine(
@@ -98,11 +108,14 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
       assert original_reservation.memory_mb == 4096
 
       Process.exit(pid, :kill)
-      Process.sleep(50)  
+      Process.sleep(50)
 
       {:ok, drift_result} = DriftDetector.detect_drift()
-      zombies = Map.get(drift_result, :anomalies, [])
-                |> Enum.filter(&(&1.type == :zombie))
+
+      zombies =
+        Map.get(drift_result, :anomalies, [])
+        |> Enum.filter(&(&1.type == :zombie))
+
       zombie = Enum.find(zombies, fn z -> z.machine_id == machine_id end)
 
       assert zombie != nil, "Machine should be detected as zombie"
@@ -110,6 +123,7 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
       case ResourceManager.get_reservation(machine_id) do
         {:ok, orphaned_reservation} ->
           assert orphaned_reservation.cpu_cores == 2.0
+
         {:error, :not_found} ->
           :ok
       end
@@ -154,8 +168,11 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
       Process.sleep(200)
 
       {:ok, drift_result} = DriftDetector.detect_drift()
-      zombies = Map.get(drift_result, :anomalies, [])
-                |> Enum.filter(&(&1.type == :zombie))
+
+      zombies =
+        Map.get(drift_result, :anomalies, [])
+        |> Enum.filter(&(&1.type == :zombie))
+
       zombie = Enum.find(zombies, fn z -> z.machine_id == machine_id end)
       assert zombie != nil, "Machine should be detected as zombie before concurrent repair"
 
@@ -210,8 +227,10 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
       reserved_before = capacity_before.reserved.memory_mb
 
       {:ok, drift_result} = DriftDetector.detect_drift()
-      zombies = Map.get(drift_result, :anomalies, [])
-                |> Enum.filter(&(&1.type == :zombie))
+
+      zombies =
+        Map.get(drift_result, :anomalies, [])
+        |> Enum.filter(&(&1.type == :zombie))
 
       assert length(zombies) >= 3, "Expected >= 3 zombies detected"
 
@@ -234,8 +253,10 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
       )
 
       Process.sleep(500)
-      zombies_second_pass = Map.get(DriftDetector.detect_drift() |> elem(1), :anomalies, [])
-                            |> Enum.filter(&(&1.type == :zombie))
+
+      zombies_second_pass =
+        Map.get(DriftDetector.detect_drift() |> elem(1), :anomalies, [])
+        |> Enum.filter(&(&1.type == :zombie))
 
       if length(zombies_second_pass) > 0 do
         zombies_second_pass
@@ -280,12 +301,16 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
       capacity_after = ResourceManager.get_capacity()
       _available_after = capacity_after.available.memory_mb
 
-      assert_eventually(fn ->
-        capacity_current = ResourceManager.get_capacity()
-        available_current = capacity_current.available.memory_mb
-        freed = available_current - available_before
-        freed >= 2048
-      end, 5000, "Expected >= 2048 MB freed")
+      assert_eventually(
+        fn ->
+          capacity_current = ResourceManager.get_capacity()
+          available_current = capacity_current.available.memory_mb
+          freed = available_current - available_before
+          freed >= 2048
+        end,
+        5000,
+        "Expected >= 2048 MB freed"
+      )
     end
 
     defp assert_eventually(fun, timeout, message) do
@@ -479,7 +504,7 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
         )
       end
 
-      Process.sleep(200)  
+      Process.sleep(200)
 
       _capacity_before = ResourceManager.get_capacity()
 

@@ -85,13 +85,11 @@ async fn main() {
         .and(chaos_state_filter.clone())
         .and_then(handle_chaos_heal);
 
-    let health = warp::get()
-        .and(warp::path("health"))
-        .map(|| {
-            warp::reply::json(&GenericResp {
-                status: "ok".into(),
-            })
-        });
+    let health = warp::get().and(warp::path("health")).map(|| {
+        warp::reply::json(&GenericResp {
+            status: "ok".into(),
+        })
+    });
 
     let chaos_status = warp::get()
         .and(warp::path!("chaos" / "status"))
@@ -406,19 +404,17 @@ async fn handle_chaos_heal(
 }
 
 /// Returns the current status of all active chaos incidents
-async fn handle_chaos_status(
-    state: ChaosState,
-) -> Result<impl warp::Reply, Infallible> {
+async fn handle_chaos_status(state: ChaosState) -> Result<impl warp::Reply, Infallible> {
     let incidents = state.active_incidents.read().await;
     let active: Vec<_> = incidents.values().cloned().collect();
-    
+
     #[derive(Serialize)]
     struct StatusResp {
         status: String,
         active_count: usize,
         incidents: Vec<ChaosInjectReq>,
     }
-    
+
     Ok(warp::reply::json(&StatusResp {
         status: "ok".into(),
         active_count: active.len(),

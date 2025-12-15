@@ -35,10 +35,12 @@ defmodule Orchestrator.MachineActor.Storage do
         _ = Exqlite.Sqlite3.execute(conn, "PRAGMA busy_timeout=5000")
 
         check_sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+
         case Exqlite.Sqlite3.prepare(conn, check_sql) do
           {:ok, stmt} ->
             Logger.debug("Prepare check_sql succeeded")
             Exqlite.Sqlite3.close(stmt)
+
           {:error, reason} ->
             Logger.error("Prepare check_sql failed: #{inspect(reason)}")
         end
@@ -51,6 +53,7 @@ defmodule Orchestrator.MachineActor.Storage do
           {:error, reason} ->
             Logger.error("Schema initialization failed: #{inspect(reason)}")
             Exqlite.Sqlite3.close(conn)
+
             if retries_left > 0 do
               Process.sleep(100 * (6 - retries_left))
               do_init_with_retry(db_path, retries_left - 1)
@@ -61,6 +64,7 @@ defmodule Orchestrator.MachineActor.Storage do
 
       {:error, reason} ->
         Logger.error("Failed to open SQLite database: #{inspect(reason)}")
+
         if retries_left > 0 do
           Process.sleep(200 * (6 - retries_left))
           do_init_with_retry(db_path, retries_left - 1)
@@ -288,7 +292,9 @@ defmodule Orchestrator.MachineActor.Storage do
   end
 
   defp insert_schema_version(conn) do
-    sql = "INSERT INTO schema_version (version, applied_at) VALUES (#{@schema_version}, '#{DateTime.to_iso8601(DateTime.utc_now())}')"
+    sql =
+      "INSERT INTO schema_version (version, applied_at) VALUES (#{@schema_version}, '#{DateTime.to_iso8601(DateTime.utc_now())}')"
+
     case exec_sql(conn, sql) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
@@ -333,6 +339,7 @@ defmodule Orchestrator.MachineActor.Storage do
 
         Exqlite.Sqlite3.close(stmt)
         result
+
       {:error, reason} ->
         Logger.error("query_rows prepare failed: #{inspect(reason)}")
         {:error, reason}
@@ -354,6 +361,7 @@ defmodule Orchestrator.MachineActor.Storage do
 
         Exqlite.Sqlite3.close(stmt)
         result
+
       {:error, reason} ->
         Logger.error("exec_sql prepare failed: #{inspect(reason)}")
         {:error, reason}
@@ -362,9 +370,9 @@ defmodule Orchestrator.MachineActor.Storage do
 
   def execute(conn, sql, params \\ []) do
     if String.starts_with?(String.upcase(String.trim(sql)), "SELECT") do
-       query_rows(conn, sql, params)
+      query_rows(conn, sql, params)
     else
-       exec_sql(conn, sql, params)
+      exec_sql(conn, sql, params)
     end
   end
 
@@ -381,6 +389,4 @@ defmodule Orchestrator.MachineActor.Storage do
       {:error, reason} -> {:error, reason}
     end
   end
-
-
 end

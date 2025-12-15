@@ -348,6 +348,7 @@ defmodule Orchestrator.Logs.AggregatorTest do
       else
         Process.sleep(100)
         logs = Aggregator.get_recent_logs(5)
+
         if length(logs) > 0 do
           first_log = List.first(logs)
           assert first_log.message == "Log 5"

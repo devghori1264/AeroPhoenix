@@ -39,7 +39,8 @@ defmodule Orchestrator.Placement.Executor do
   @spec apply_cost_optimization(list(map()), keyword()) ::
           {:ok, execution_result()} | {:error, any()}
   def apply_cost_optimization(recommendations, opts \\ []) do
-    Logger.info("Applying cost optimization recommendations with client: #{inspect(@flyd_client)}",
+    Logger.info(
+      "Applying cost optimization recommendations with client: #{inspect(@flyd_client)}",
       count: length(recommendations),
       mode: opts[:mode] || :dry_run
     )

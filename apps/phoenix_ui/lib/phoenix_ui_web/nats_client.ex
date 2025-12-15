@@ -76,6 +76,5 @@ defmodule PhoenixUiWeb.NatsClient do
     {:noreply, nil}
   end
 
-
   defp schedule_reconnect, do: Process.send_after(self(), :reconnect, @reconnect_interval_ms)
 end

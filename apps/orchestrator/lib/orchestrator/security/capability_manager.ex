@@ -162,12 +162,13 @@ defmodule Orchestrator.Security.CapabilityManager do
     result =
       case {capability.action, restriction} do
         {:write_volume, :read_only} ->
-          attenuated_cap = Map.merge(capability, %{
-            id: UUID.uuid4(),
-            action: :read_volume,
-            delegation_depth: capability.delegation_depth + 1,
-            parent_id: capability.id
-          })
+          attenuated_cap =
+            Map.merge(capability, %{
+              id: UUID.uuid4(),
+              action: :read_volume,
+              delegation_depth: capability.delegation_depth + 1,
+              parent_id: capability.id
+            })
 
           :ets.insert(:capability_grants, {capability.machine_id, attenuated_cap})
 
@@ -208,13 +209,14 @@ defmodule Orchestrator.Security.CapabilityManager do
           {:error, :max_delegation_depth}
 
         true ->
-          delegated_cap = Map.merge(capability, %{
-            id: UUID.uuid4(),
-            machine_id: to_machine,
-            delegation_depth: capability.delegation_depth + 1,
-            delegated_from: capability.machine_id,
-            delegated_at: System.system_time(:second)
-          })
+          delegated_cap =
+            Map.merge(capability, %{
+              id: UUID.uuid4(),
+              machine_id: to_machine,
+              delegation_depth: capability.delegation_depth + 1,
+              delegated_from: capability.machine_id,
+              delegated_at: System.system_time(:second)
+            })
 
           :ets.insert(:capability_grants, {to_machine, delegated_cap})
 

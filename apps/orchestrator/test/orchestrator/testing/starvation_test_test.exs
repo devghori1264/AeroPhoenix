@@ -7,6 +7,7 @@ defmodule Orchestrator.Testing.StarvationTestTest do
     if pid = Process.whereis(StarvationTest) do
       Process.exit(pid, :kill)
       ref = Process.monitor(pid)
+
       receive do
         {:DOWN, ^ref, _, _, _} -> :ok
       end
@@ -119,7 +120,10 @@ defmodule Orchestrator.Testing.StarvationTestTest do
       end)
 
       result =
-        StarvationTest.retry_with_backoff(StarvationTest, "iad", max_retries: 10, base_delay_ms: 20)
+        StarvationTest.retry_with_backoff(StarvationTest, "iad",
+          max_retries: 10,
+          base_delay_ms: 20
+        )
 
       assert {:ok, _machine_id} = result
     end
@@ -129,11 +133,13 @@ defmodule Orchestrator.Testing.StarvationTestTest do
       {:ok, _machines} = StarvationTest.fill_to_capacity("iad", 10)
 
       start_time = System.monotonic_time(:millisecond)
+
       StarvationTest.retry_with_backoff(StarvationTest, "iad",
         max_retries: 3,
         base_delay_ms: 100,
         jitter: false
       )
+
       end_time = System.monotonic_time(:millisecond)
 
       duration_ms = end_time - start_time
@@ -510,6 +516,7 @@ defmodule Orchestrator.Testing.StarvationTestTest do
              "Capacity check took #{duration_us}μs, expected < 5000μs"
     end
   end
+
   def handle_telemetry_event(event_name, measurements, metadata, test_pid) do
     send(test_pid, {:telemetry_event, event_name, measurements, metadata})
   end

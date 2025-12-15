@@ -34,20 +34,21 @@ Application.put_env(:orchestrator, :machine_data_dir, "tmp/test_machines")
 is_ci = System.get_env("CI") == "true"
 cores = System.schedulers_online()
 
-max_cases = if is_ci do
-  min(cores * 2, 4)
-else
-  8
-end
+max_cases =
+  if is_ci do
+    min(cores * 2, 4)
+  else
+    8
+  end
 
-IO.puts """
+IO.puts("""
 =============================================================
  Test Runner Configuration
    Environment: #{if is_ci, do: "CI (GitHub)", else: "Local (M1/Dev)"}
    Available Cores: #{cores}
    Concurrency Limit: #{max_cases} workers
 =============================================================
-"""
+""")
 
 ExUnit.start(
   max_cases: max_cases,

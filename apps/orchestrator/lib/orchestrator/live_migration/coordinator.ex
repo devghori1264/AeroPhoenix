@@ -50,9 +50,10 @@ defmodule Orchestrator.LiveMigration.Coordinator do
 
   def start_migration(machine_id, target_region, opts) when is_list(opts) do
     migration_id = generate_migration_id()
+
     case GenServer.start_link(__MODULE__, {migration_id, machine_id, target_region, opts},
-      name: via_tuple(machine_id)
-    ) do
+           name: via_tuple(machine_id)
+         ) do
       {:ok, _pid} -> {:ok, migration_id}
       error -> error
     end
@@ -101,7 +102,6 @@ defmodule Orchestrator.LiveMigration.Coordinator do
 
   @impl true
   def init({migration_id, machine_id, target_region, opts}) do
-
     Logger.info("LiveMigration coordinator starting",
       migration_id: migration_id,
       machine_id: machine_id,
@@ -770,6 +770,7 @@ defmodule Orchestrator.LiveMigration.Coordinator do
 
   defp get_completed_migration_status(migration_id) do
     Logger.debug("Querying completed migration status", migration_id: migration_id)
+
     case :ets.lookup(:live_migrations, migration_id) do
       [{^migration_id, record}] when is_map(record) -> {:ok, record}
       [{^migration_id, _machine_id, _pid}] -> {:error, :in_progress}

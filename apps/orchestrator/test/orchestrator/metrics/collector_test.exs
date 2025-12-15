@@ -169,9 +169,10 @@ defmodule Orchestrator.Metrics.CollectorTest do
     test "returns empty list when no test metrics" do
       metrics = Collector.get_metrics()
 
-      test_metrics = Enum.filter(metrics, fn m ->
-        String.starts_with?(m.name, "test_")
-      end)
+      test_metrics =
+        Enum.filter(metrics, fn m ->
+          String.starts_with?(m.name, "test_")
+        end)
 
       assert test_metrics == []
     end
@@ -183,9 +184,10 @@ defmodule Orchestrator.Metrics.CollectorTest do
 
       metrics = Collector.get_metrics()
 
-      test_metrics = Enum.filter(metrics, fn m ->
-        m.name in ["test_counter", "test_gauge", "test_histogram"]
-      end)
+      test_metrics =
+        Enum.filter(metrics, fn m ->
+          m.name in ["test_counter", "test_gauge", "test_histogram"]
+        end)
 
       assert length(test_metrics) == 3
 

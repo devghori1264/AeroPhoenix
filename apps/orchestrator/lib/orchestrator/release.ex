@@ -1,5 +1,4 @@
 defmodule Orchestrator.Release do
-
   @app :orchestrator
 
   def migrate do

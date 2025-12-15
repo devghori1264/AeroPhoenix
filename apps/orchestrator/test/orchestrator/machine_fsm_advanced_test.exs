@@ -129,7 +129,9 @@ defmodule Orchestrator.MachineFSMAdvancedTest do
         })
         |> Repo.insert()
 
-      {:ok, pid} = MachineFSM.start_link(%{id: machine_id, status: "running", sandbox_owner: self()})
+      {:ok, pid} =
+        MachineFSM.start_link(%{id: machine_id, status: "running", sandbox_owner: self()})
+
       Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
       {:ok, state} = MachineFSM.get_state(machine_id)
       assert state.health_check_interval_ms > 0
@@ -186,13 +188,16 @@ defmodule Orchestrator.MachineFSMAdvancedTest do
       if Process.alive?(pid) do
         GenServer.stop(pid)
       end
+
       machine = Repo.get!(Machine, machine_id)
 
       machine
       |> Machine.changeset(%{status: "suspended"})
       |> Repo.update!()
 
-      {:ok, pid} = MachineFSM.start_link(%{id: machine_id, status: "suspended", sandbox_owner: self()})
+      {:ok, pid} =
+        MachineFSM.start_link(%{id: machine_id, status: "suspended", sandbox_owner: self()})
+
       Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
       result = MachineFSM.resume(machine_id)
       assert match?({:ok, _}, result) or match?({:noreply, _}, result)
@@ -276,7 +281,9 @@ defmodule Orchestrator.MachineFSMAdvancedTest do
         })
         |> Repo.insert()
 
-      {:ok, pid} = MachineFSM.start_link(%{id: machine_id, status: "error", sandbox_owner: self()})
+      {:ok, pid} =
+        MachineFSM.start_link(%{id: machine_id, status: "error", sandbox_owner: self()})
+
       Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
       {:ok, state} = MachineFSM.get_state(machine_id)
       assert state.status == :error
@@ -288,13 +295,16 @@ defmodule Orchestrator.MachineFSMAdvancedTest do
       if Process.alive?(pid) do
         GenServer.stop(pid)
       end
+
       machine = Repo.get!(Machine, machine_id)
 
       machine
       |> Machine.changeset(%{status: "running"})
       |> Repo.update!()
 
-      {:ok, pid} = MachineFSM.start_link(%{id: machine_id, status: "running", sandbox_owner: self()})
+      {:ok, pid} =
+        MachineFSM.start_link(%{id: machine_id, status: "running", sandbox_owner: self()})
+
       Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
 
       try do

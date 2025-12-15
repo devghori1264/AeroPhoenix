@@ -4,6 +4,7 @@ defmodule Orchestrator.MockFlydClient do
   def create_machine(_config), do: {:ok, %{"id" => "mock-id", "status" => "created"}}
 
   def migrate_machine("error", _target, _opts), do: {:error, :simulated_error}
+
   def migrate_machine(_id, _target, _opts) do
     Logger.info("MockFlydClient.migrate_machine called")
     {:ok, %{"migration_id" => "mig_#{Ecto.UUID.generate()}", "estimated_duration_ms" => 100}}
@@ -22,6 +23,7 @@ defmodule Orchestrator.MockFlydClient do
   def get_machine(_id), do: {:ok, %{}}
 
   def stream_migration_progress(_id), do: Stream.map(1..5, & &1)
+
   def stream_migration_progress(_id, callback) do
     Enum.each(1..5, callback)
     {:ok, :completed}
@@ -66,13 +68,16 @@ defmodule Orchestrator.MockFlydClient do
   def get_connection_stats(_region, "not_implemented"), do: {:error, :not_implemented}
   def get_connection_stats(_region, _id), do: {:ok, %{}}
   def get_machine_state(id, opts \\ [])
+
   def get_machine_state("error-" <> _rest, _opts) do
     {:error, :simulated_error}
   end
+
   def get_machine_state(_id, _opts) do
-    {:ok, %{
-      status: "started",
-      config: %{image: "nginx", size: "s-1vcpu-1gb", region: "us-east-1"}
-    }}
+    {:ok,
+     %{
+       status: "started",
+       config: %{image: "nginx", size: "s-1vcpu-1gb", region: "us-east-1"}
+     }}
   end
 end

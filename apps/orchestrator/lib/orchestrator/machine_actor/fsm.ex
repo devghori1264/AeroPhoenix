@@ -77,14 +77,41 @@ defmodule Orchestrator.MachineActor.FSM do
   @spec resolve_target_state(transition_type() | state(), keyword()) :: state()
   def resolve_target_state(transition_type, _opts \\ []) do
     case transition_type do
-      :start -> :starting
-      :stop -> :stopping
-      :destroy -> :destroying
-      :suspend -> :suspended
-      :resume -> :starting
-      :restart -> :stopping
-      :migrate -> :migrating
-      state when state in [:created, :starting, :running, :suspended, :stopping, :stopped, :migrating, :destroying, :destroyed, :error] -> state
+      :start ->
+        :starting
+
+      :stop ->
+        :stopping
+
+      :destroy ->
+        :destroying
+
+      :suspend ->
+        :suspended
+
+      :resume ->
+        :starting
+
+      :restart ->
+        :stopping
+
+      :migrate ->
+        :migrating
+
+      state
+      when state in [
+             :created,
+             :starting,
+             :running,
+             :suspended,
+             :stopping,
+             :stopped,
+             :migrating,
+             :destroying,
+             :destroyed,
+             :error
+           ] ->
+        state
     end
   end
 
@@ -122,7 +149,19 @@ defmodule Orchestrator.MachineActor.FSM do
       :suspend ->
         check_suspend_preconditions(current_state)
 
-      state when state in [:created, :starting, :running, :suspended, :stopping, :stopped, :migrating, :destroying, :destroyed, :error] ->
+      state
+      when state in [
+             :created,
+             :starting,
+             :running,
+             :suspended,
+             :stopping,
+             :stopped,
+             :migrating,
+             :destroying,
+             :destroyed,
+             :error
+           ] ->
         :ok
 
       _ ->

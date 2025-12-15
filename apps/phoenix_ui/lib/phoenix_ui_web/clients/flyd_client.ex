@@ -2,7 +2,6 @@ defmodule PhoenixUiWeb.FlydClient do
   require Logger
   alias Finch.Response
 
-
   defp base_url do
     Application.get_env(:phoenix_ui, :flyd_base) || "http://localhost:8080"
   end

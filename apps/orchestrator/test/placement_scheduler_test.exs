@@ -69,9 +69,27 @@ defmodule Orchestrator.PlacementSchedulerTest do
       {:ok, _pid} = Scheduler.start_link(regions: ["us-east-1", "us-west-1"])
 
       machines = [
-        %{id: "m1", cpu: 2, memory_gb: 4, disk_gb: 20, traffic_sources: [%{region: "us-east-1", weight: 0.9}]},
-        %{id: "m2", cpu: 4, memory_gb: 8, disk_gb: 40, traffic_sources: [%{region: "us-west-1", weight: 0.9}]},
-        %{id: "m3", cpu: 2, memory_gb: 4, disk_gb: 20, traffic_sources: [%{region: "us-west-1", weight: 0.5}]}
+        %{
+          id: "m1",
+          cpu: 2,
+          memory_gb: 4,
+          disk_gb: 20,
+          traffic_sources: [%{region: "us-east-1", weight: 0.9}]
+        },
+        %{
+          id: "m2",
+          cpu: 4,
+          memory_gb: 8,
+          disk_gb: 40,
+          traffic_sources: [%{region: "us-west-1", weight: 0.9}]
+        },
+        %{
+          id: "m3",
+          cpu: 2,
+          memory_gb: 4,
+          disk_gb: 20,
+          traffic_sources: [%{region: "us-west-1", weight: 0.5}]
+        }
       ]
 
       {:ok, batch_result} = Scheduler.schedule_batch(machines, %{})

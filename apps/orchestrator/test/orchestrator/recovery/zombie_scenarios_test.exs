@@ -16,8 +16,11 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       nil ->
         Supervisor.restart_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
         Process.sleep(100)
-      _ -> :ok
+
+      _ ->
+        :ok
     end
+
     Orchestrator.ResourceManager.reset()
 
     File.rm_rf("tmp/test_machines")
@@ -99,15 +102,18 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
         restart: :temporary
       )
 
-    wait_for_condition(fn ->
-      case get_machine_state(machine_id) do
-        %{state: ^initial_state} -> true
-        _ -> false
-      end
-    end, 5000)
+    wait_for_condition(
+      fn ->
+        case get_machine_state(machine_id) do
+          %{state: ^initial_state} -> true
+          _ -> false
+        end
+      end,
+      5000
+    )
 
     unless get_machine_state(machine_id).state == initial_state do
-       raise "Failed to start machine #{machine_id} in state #{initial_state}"
+      raise "Failed to start machine #{machine_id} in state #{initial_state}"
     end
 
     {:ok, pid}
@@ -140,7 +146,11 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
     """)
 
     Exqlite.Sqlite3.execute(conn, "CREATE TABLE IF NOT EXISTS meta (key TEXT, value TEXT);")
-    Exqlite.Sqlite3.execute(conn, "CREATE TABLE IF NOT EXISTS machines (id TEXT PRIMARY KEY, region TEXT, state TEXT, image TEXT, size_json TEXT, capabilities_json TEXT, created_at TEXT, updated_at TEXT, version INTEGER);")
+
+    Exqlite.Sqlite3.execute(
+      conn,
+      "CREATE TABLE IF NOT EXISTS machines (id TEXT PRIMARY KEY, region TEXT, state TEXT, image TEXT, size_json TEXT, capabilities_json TEXT, created_at TEXT, updated_at TEXT, version INTEGER);"
+    )
 
     Exqlite.Sqlite3.close(conn)
   end
@@ -151,6 +161,7 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
     create_dummy_wal_db(db_path)
 
     {:ok, conn} = Exqlite.Sqlite3.open(db_path)
+
     sql = """
     INSERT INTO wal_entries (operation_id, from_state, to_state, transition_type, opts_json, timestamp, status)
     VALUES ('corrupt_op_' || hex(randomblob(8)), 'running', 'migrating', 'migrate', '{"corrupt":true}', datetime('now'), 'pending')
@@ -179,8 +190,6 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
     do_wait(fun, start_time, timeout)
   end
 
-
-
   defp do_wait(fun, start_time, timeout) do
     if fun.() do
       true
@@ -202,9 +211,9 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
 
       Task.start(fn ->
         try do
-           GenServer.call(pid, {:transition, :migrate, [target_region: "edge-eu-central"]})
+          GenServer.call(pid, {:transition, :migrate, [target_region: "edge-eu-central"]})
         catch
-           _, _ -> :ok
+          _, _ -> :ok
         end
       end)
 
@@ -220,7 +229,9 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       if zombie do
         assert zombie.type == :zombie
       else
-        Logger.info("Migration interruption test: zombie not detected (acceptable in distributed systems)")
+        Logger.info(
+          "Migration interruption test: zombie not detected (acceptable in distributed systems)"
+        )
       end
 
       zombie_anomaly = Enum.find(zombies, fn z -> z.machine_id == machine_id end)
@@ -231,23 +242,33 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
 
       case result do
         {:ok, outcome} when outcome in [:repaired, :already_healthy] ->
-          success = wait_for_condition(fn ->
-                     state = get_machine_state(machine_id)
-                     state != nil
-                   end, 10_000)
+          success =
+            wait_for_condition(
+              fn ->
+                state = get_machine_state(machine_id)
+                state != nil
+              end,
+              10_000
+            )
 
           if success do
-            success = wait_for_condition(fn ->
-              state = get_machine_state(machine_id)
-              state != nil and state.state in [:running, :stopped, :migrating, :created]
-            end, 10_000)
+            success =
+              wait_for_condition(
+                fn ->
+                  state = get_machine_state(machine_id)
+                  state != nil and state.state in [:running, :stopped, :migrating, :created]
+                end,
+                10_000
+              )
 
             if success do
               state = get_machine_state(machine_id)
+
               assert state.state in [:running, :stopped, :migrating, :created],
-                "Machine should be in a valid state after repair, got: #{inspect(state.state)}"
+                     "Machine should be in a valid state after repair, got: #{inspect(state.state)}"
             else
               state = get_machine_state(machine_id)
+
               if state != nil do
                 Logger.info("Machine resurrected in state: #{inspect(state.state)}")
                 assert true, "Machine was successfully resurrected"
@@ -271,6 +292,7 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
         new_metadata = %{state.metadata | state: :migrating}
         %{state | metadata: new_metadata}
       end)
+
       Process.sleep(10)
       kill_process_brutally(pid)
 
@@ -285,9 +307,13 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
         assert match?({:ok, _}, result) or match?({:error, {:repair_failed, _}}, result)
 
         if match?({:ok, _}, result) do
-          recovered = wait_for_condition(fn ->
-                   get_machine_state(machine_id) != nil
-                 end, 10_000)
+          recovered =
+            wait_for_condition(
+              fn ->
+                get_machine_state(machine_id) != nil
+              end,
+              10_000
+            )
 
           if recovered do
             state = get_machine_state(machine_id)
@@ -316,9 +342,13 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       assert match?({:ok, _}, result)
 
       if match?({:ok, _}, result) do
-        success = wait_for_condition(fn ->
-                   get_machine_state(machine_id) != nil
-                 end, 10_000)
+        success =
+          wait_for_condition(
+            fn ->
+              get_machine_state(machine_id) != nil
+            end,
+            10_000
+          )
 
         if success do
           new_state = get_machine_state(machine_id)
@@ -362,15 +392,15 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       {:ok, conn} = Exqlite.Sqlite3.open(db_path)
 
       case Exqlite.Sqlite3.execute(
-        conn,
-        """
-        INSERT INTO wal_entries (operation_id, from_state, to_state, transition_type, opts_json, timestamp, status)
-        VALUES ('incomplete_op_' || hex(randomblob(8)), 'stopped', 'running', 'start', '{}', datetime('now', '-10 seconds'), 'pending')
-        """
-      ) do
-         {:ok, _} -> :ok
-         :ok -> :ok
-         {:error, _} -> :ok
+             conn,
+             """
+             INSERT INTO wal_entries (operation_id, from_state, to_state, transition_type, opts_json, timestamp, status)
+             VALUES ('incomplete_op_' || hex(randomblob(8)), 'stopped', 'running', 'start', '{}', datetime('now', '-10 seconds'), 'pending')
+             """
+           ) do
+        {:ok, _} -> :ok
+        :ok -> :ok
+        {:error, _} -> :ok
       end
 
       :ok = Exqlite.Sqlite3.close(conn)
@@ -384,9 +414,13 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
         assert match?({:ok, _}, result) or match?({:error, {:repair_failed, _}}, result)
 
         if match?({:ok, _}, result) do
-          _ = wait_for_condition(fn ->
-                   get_machine_state(machine_id) != nil
-                 end, 10_000)
+          _ =
+            wait_for_condition(
+              fn ->
+                get_machine_state(machine_id) != nil
+              end,
+              10_000
+            )
         end
       end
     end
@@ -398,7 +432,6 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       kill_process_brutally(pid)
 
       db_path = Storage.db_path(machine_id)
-
 
       create_dummy_wal_db(db_path)
       {:ok, conn} = Storage.init(db_path)
@@ -414,9 +447,13 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
         assert match?({:ok, _}, result) or match?({:error, {:repair_failed, _}}, result)
 
         if match?({:ok, _}, result) do
-          success = wait_for_condition(fn ->
-                   get_machine_state(machine_id) != nil
-                 end, 10_000)
+          success =
+            wait_for_condition(
+              fn ->
+                get_machine_state(machine_id) != nil
+              end,
+              10_000
+            )
 
           if success do
             assert true
@@ -464,12 +501,16 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
                "Unexpected error reason: #{inspect(reason)}"
       end)
 
-      resurrected = wait_for_condition(fn ->
-        case Registry.lookup(Orchestrator.Registry.Machines, {nil, machine_id}) do
-          [{pid, _}] when is_pid(pid) -> Process.alive?(pid)
-          _ -> false
-        end
-      end, 3000)
+      resurrected =
+        wait_for_condition(
+          fn ->
+            case Registry.lookup(Orchestrator.Registry.Machines, {nil, machine_id}) do
+              [{pid, _}] when is_pid(pid) -> Process.alive?(pid)
+              _ -> false
+            end
+          end,
+          3000
+        )
 
       if not resurrected do
         :ok
@@ -505,8 +546,6 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       assert successes >= 1
       assert failures >= 0
     end
-
-
   end
 
   describe "ghost to zombie transitions" do
@@ -522,7 +561,6 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       Process.sleep(200)
 
       final_result = DriftDetector.check_machine(machine_id)
-
 
       case final_result do
         {:ok, {:anomaly, %{type: :zombie}}} ->
@@ -684,11 +722,14 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       {:ok, pid} = start_machine_with_state(machine_id, :running)
       kill_process_brutally(pid)
 
-      wait_for_condition(fn ->
-        {:ok, result} = DriftDetector.detect_drift()
-        zombies = Enum.filter(result.anomalies, &(&1.type == :zombie))
-        Enum.any?(zombies, fn z -> z.machine_id == machine_id end)
-      end, 5000)
+      wait_for_condition(
+        fn ->
+          {:ok, result} = DriftDetector.detect_drift()
+          zombies = Enum.filter(result.anomalies, &(&1.type == :zombie))
+          Enum.any?(zombies, fn z -> z.machine_id == machine_id end)
+        end,
+        5000
+      )
 
       {:ok, result} = DriftDetector.detect_drift()
       zombies = Enum.filter(result.anomalies, &(&1.type == :zombie))
@@ -762,10 +803,11 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
       case Exqlite.Sqlite3.open(db_path) do
         {:ok, conn} ->
           case Exqlite.Sqlite3.execute(conn, "DELETE FROM wal_entries") do
-             {:ok, _} -> :ok
-             :ok -> :ok
-             {:error, _} -> :ok
+            {:ok, _} -> :ok
+            :ok -> :ok
+            {:error, _} -> :ok
           end
+
           :ok = Exqlite.Sqlite3.close(conn)
 
         {:error, _} ->
@@ -781,9 +823,12 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
 
         case repair_result do
           {:ok, _} ->
-            assert wait_for_condition(fn ->
-                     get_machine_state(machine_id) != nil
-                   end, 30_000)
+            assert wait_for_condition(
+                     fn ->
+                       get_machine_state(machine_id) != nil
+                     end,
+                     30_000
+                   )
 
           {:error, _} ->
             :ok
@@ -801,7 +846,12 @@ defmodule Orchestrator.Recovery.ZombieScenariosTest do
 
       case Exqlite.Sqlite3.open(db_path) do
         {:ok, conn} ->
-          {:ok, stmt} = Exqlite.Sqlite3.prepare(conn, "UPDATE machines SET state = 'invalid_state' WHERE id = ?")
+          {:ok, stmt} =
+            Exqlite.Sqlite3.prepare(
+              conn,
+              "UPDATE machines SET state = 'invalid_state' WHERE id = ?"
+            )
+
           :ok = Exqlite.Sqlite3.bind(stmt, [machine_id])
           :done = Exqlite.Sqlite3.step(conn, stmt)
 

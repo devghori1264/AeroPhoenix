@@ -34,7 +34,8 @@ defmodule Orchestrator.Application do
          source_region: region_id(), target_regions: peer_regions()},
         Orchestrator.Security.OIDCProvider,
         Orchestrator.Security.KillSwitch,
-        {Orchestrator.Recovery.Reconciler, [interval_ms: Application.get_env(:orchestrator, :reconciler_interval, 60_000)]},
+        {Orchestrator.Recovery.Reconciler,
+         [interval_ms: Application.get_env(:orchestrator, :reconciler_interval, 60_000)]},
         Orchestrator.NatsListener,
         Orchestrator.Metrics.Collector,
         Orchestrator.Metrics.LatencyTracker,
@@ -73,7 +74,6 @@ defmodule Orchestrator.Application do
   defp telemetry_port, do: String.to_integer(System.get_env("TELEMETRY_PORT", "9569"))
 
   defp cluster_size do
-
     System.get_env("CLUSTER_SIZE", "1") |> String.to_integer()
   end
 

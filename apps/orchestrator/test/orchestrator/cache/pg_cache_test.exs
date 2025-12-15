@@ -12,7 +12,6 @@ defmodule Orchestrator.Cache.PgCacheTest do
     :ets.new(l2_name, [:set, :public, :named_table])
     :ets.new(l3_name, [:set, :public, :named_table])
 
-
     {:ok, pid} =
       PgCache.start_link(
         name: Module.concat(PgCache, :"Test#{unique_suffix}"),

@@ -135,7 +135,6 @@ defmodule Orchestrator.Migration.StateTransferTest do
 
   describe "telemetry events" do
     setup do
-
       events = [
         [:orchestrator, :state_transfer, :snapshot_created],
         [:orchestrator, :state_transfer, :wal_shipped],

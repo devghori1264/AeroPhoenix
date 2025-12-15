@@ -59,7 +59,13 @@ defmodule Orchestrator.Recovery.DriftDetector do
     timeout = Keyword.get(opts, :timeout, 5_000)
     skip_state_check = Keyword.get(opts, :skip_state_check, false)
     parallel = Keyword.get(opts, :parallel, false)
-    data_dir = Keyword.get(opts, :data_dir, Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines"))
+
+    data_dir =
+      Keyword.get(
+        opts,
+        :data_dir,
+        Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
+      )
 
     Logger.info("Starting drift detection scan",
       node: node(),
@@ -170,7 +176,13 @@ defmodule Orchestrator.Recovery.DriftDetector do
           | {:ok, {:anomaly, anomaly()}}
           | {:error, :not_found | term()}
   def check_machine(machine_id, opts \\ []) when is_binary(machine_id) do
-    data_dir = Keyword.get(opts, :data_dir, Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines"))
+    data_dir =
+      Keyword.get(
+        opts,
+        :data_dir,
+        Application.get_env(:orchestrator, :machine_actor_data_dir, "data/machines")
+      )
+
     db_path = get_db_path(machine_id, data_dir)
 
     unless File.exists?(db_path) do
@@ -209,8 +221,6 @@ defmodule Orchestrator.Recovery.DriftDetector do
               }
           end
         end)
-
-
 
       {:error, :enoent} ->
         []
@@ -321,12 +331,6 @@ defmodule Orchestrator.Recovery.DriftDetector do
     end
   end
 
-
-
-
-
-
-
   defp get_process_state(pid, timeout) do
     try do
       case GenServer.call(pid, :get_state, timeout) do
@@ -344,12 +348,12 @@ defmodule Orchestrator.Recovery.DriftDetector do
   end
 
   defp detect_anomalies_sequential(
-          all_processes,
-          registry_entries,
-          db_machines,
-          timeout,
-          skip_state_check
-        ) do
+         all_processes,
+         registry_entries,
+         db_machines,
+         timeout,
+         skip_state_check
+       ) do
     ghosts = detect_ghosts(registry_entries, all_processes)
     zombies = detect_zombies(db_machines, registry_entries)
 
@@ -364,12 +368,12 @@ defmodule Orchestrator.Recovery.DriftDetector do
   end
 
   defp detect_anomalies_parallel(
-          all_processes,
-          registry_entries,
-          db_machines,
-          timeout,
-          skip_state_check
-        ) do
+         all_processes,
+         registry_entries,
+         db_machines,
+         timeout,
+         skip_state_check
+       ) do
     tasks = [
       Task.async(fn -> detect_ghosts(registry_entries, all_processes) end),
       Task.async(fn -> detect_zombies(db_machines, registry_entries) end)
@@ -393,10 +397,13 @@ defmodule Orchestrator.Recovery.DriftDetector do
         case result do
           {:ok, []} ->
             []
+
           {:ok, anomalies} ->
             anomalies
+
           {:exit, _reason} ->
             []
+
           nil ->
             case Task.shutdown(task, :brutal_kill) do
               {:ok, res} -> res

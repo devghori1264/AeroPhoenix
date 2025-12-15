@@ -393,6 +393,7 @@ defmodule Orchestrator.Placement.Scheduler do
 
     if cost_model do
       cpu_required = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
+
       monthly_cost =
         CostModel.calculate_monthly_cost(
           cost_model,
@@ -503,7 +504,10 @@ defmodule Orchestrator.Placement.Scheduler do
     available_disk = capacity.total_disk_gb - capacity.used_disk_gb
 
     req_cpu = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
-    req_memory = Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+
+    req_memory =
+      Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+
     req_disk = Map.get(requirements, :disk_gb) || (Map.get(requirements, :disk_mb) || 0) / 1024
 
     available_cpu >= req_cpu &&
@@ -513,7 +517,10 @@ defmodule Orchestrator.Placement.Scheduler do
 
   defp reserve_capacity(state, region, requirements) do
     req_cpu = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
-    req_memory = Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+
+    req_memory =
+      Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+
     req_disk = Map.get(requirements, :disk_gb) || (Map.get(requirements, :disk_mb) || 0) / 1024
 
     update_in(state, [:capacity_tracking, region], fn capacity ->
@@ -532,7 +539,10 @@ defmodule Orchestrator.Placement.Scheduler do
 
   defp deduct_capacity(capacity_tracking, region, requirements) do
     req_cpu = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
-    req_memory = Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+
+    req_memory =
+      Map.get(requirements, :memory_gb) || (Map.get(requirements, :memory_mb) || 0) / 1024
+
     req_disk = Map.get(requirements, :disk_gb) || (Map.get(requirements, :disk_mb) || 0) / 1024
 
     update_in(capacity_tracking, [region], fn capacity ->
@@ -591,8 +601,7 @@ defmodule Orchestrator.Placement.Scheduler do
       cpu_cores: cpu_required,
       memory_gb: requirements.memory_gb,
       disk_gb: requirements.disk_gb,
-      region_cpu_utilization:
-        (capacity.used_cpu_cores + cpu_required) / capacity.total_cpu_cores,
+      region_cpu_utilization: (capacity.used_cpu_cores + cpu_required) / capacity.total_cpu_cores,
       region_memory_utilization:
         (capacity.used_memory_gb + requirements.memory_gb) / capacity.total_memory_gb
     }
@@ -603,6 +612,7 @@ defmodule Orchestrator.Placement.Scheduler do
 
     if cost_model do
       cpu_required = Map.get(requirements, :cpu_cores) || Map.get(requirements, :cpu) || 0
+
       CostModel.calculate_monthly_cost(
         cost_model,
         cpu_required,

@@ -1,4 +1,3 @@
-
 defmodule Orchestrator.Placement.ExecutorTest do
   use Orchestrator.DataCase, async: false
   @moduletag :slow

@@ -616,12 +616,21 @@ defmodule Orchestrator.Security.CapabilityManagerTest do
     end
   end
 
-
-  def handle_telemetry([:orchestrator, :capability, :check_passed], _measurements, metadata, test_pid) do
+  def handle_telemetry(
+        [:orchestrator, :capability, :check_passed],
+        _measurements,
+        metadata,
+        test_pid
+      ) do
     send(test_pid, {:check_passed, metadata})
   end
 
-  def handle_telemetry([:orchestrator, :capability, :check_failed], _measurements, metadata, test_pid) do
+  def handle_telemetry(
+        [:orchestrator, :capability, :check_failed],
+        _measurements,
+        metadata,
+        test_pid
+      ) do
     send(test_pid, {:check_failed, metadata})
   end
 

@@ -23,7 +23,8 @@ defmodule Orchestrator.Scaling.AutoScaler do
     GenServer.call(server, {:create_policy, attrs})
   end
 
-  @spec update_policy(GenServer.server(), binary(), map()) :: {:ok, ScalingPolicy.t()} | {:error, term()}
+  @spec update_policy(GenServer.server(), binary(), map()) ::
+          {:ok, ScalingPolicy.t()} | {:error, term()}
   def update_policy(server \\ __MODULE__, policy_id, attrs) do
     GenServer.call(server, {:update_policy, policy_id, attrs})
   end
@@ -447,7 +448,10 @@ defmodule Orchestrator.Scaling.AutoScaler do
 
   defp execute_scaling(service, :scale_out, count, reason) do
     Logger.info("SCALING OUT: #{service} +#{count} instances - #{reason}")
-    current_machines = Machines.Machine.list_by_service(Orchestrator.Repo, service, status: "running")
+
+    current_machines =
+      Machines.Machine.list_by_service(Orchestrator.Repo, service, status: "running")
+
     current_count = length(current_machines)
 
     results =
@@ -483,7 +487,10 @@ defmodule Orchestrator.Scaling.AutoScaler do
 
   defp execute_scaling(service, :scale_in, count, reason) do
     Logger.info("SCALING IN: #{service} -#{count} instances - #{reason}")
-    current_machines = Machines.Machine.list_by_service(Orchestrator.Repo, service, status: "running")
+
+    current_machines =
+      Machines.Machine.list_by_service(Orchestrator.Repo, service, status: "running")
+
     current_count = length(current_machines)
 
     machines_to_remove =

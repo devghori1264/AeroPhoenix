@@ -1,7 +1,6 @@
 defmodule Orchestrator.RegionRouter do
   require Logger
 
-
   defp region_endpoints do
     Application.get_env(:orchestrator, :region_endpoints, %{
       "iad" => "http://aerophoenix-flyd-sim.internal:8080",
@@ -103,16 +102,32 @@ defmodule Orchestrator.RegionRouter do
 
       case :inet.getaddr(String.to_charlist(host), :inet6) do
         {:ok, ip_tuple} ->
-          case :gen_tcp.connect(ip_tuple, port, [:binary, {:active, false}, {:packet, :http_bin}, :inet6], 5000) do
+          case :gen_tcp.connect(
+                 ip_tuple,
+                 port,
+                 [:binary, {:active, false}, {:packet, :http_bin}, :inet6],
+                 5000
+               ) do
             {:ok, socket} ->
               request_line = "#{String.upcase(to_string(method))} #{path} HTTP/1.1\r\n"
               host_header = "Host: #{host}:#{port}\r\n"
-              content_type = Enum.find(headers, fn {k, _} -> String.downcase(k) == "content-type" end)
-              content_type_header = if content_type, do: "Content-Type: #{elem(content_type, 1)}\r\n", else: ""
-              body_data = body || ""
-              content_length_header = if body, do: "Content-Length: #{byte_size(body_data)}\r\n", else: ""
 
-              http_request = request_line <> host_header <> content_type_header <> content_length_header <> "Connection: close\r\n\r\n" <> body_data
+              content_type =
+                Enum.find(headers, fn {k, _} -> String.downcase(k) == "content-type" end)
+
+              content_type_header =
+                if content_type, do: "Content-Type: #{elem(content_type, 1)}\r\n", else: ""
+
+              body_data = body || ""
+
+              content_length_header =
+                if body, do: "Content-Length: #{byte_size(body_data)}\r\n", else: ""
+
+              http_request =
+                request_line <>
+                  host_header <>
+                  content_type_header <>
+                  content_length_header <> "Connection: close\r\n\r\n" <> body_data
 
               :ok = :gen_tcp.send(socket, http_request)
 
@@ -130,11 +145,13 @@ defmodule Orchestrator.RegionRouter do
           {:error, {:dns_error, reason}}
       end
     else
-      req = if body do
-        Finch.build(method, url, headers, body)
-      else
-        Finch.build(method, url, headers)
-      end
+      req =
+        if body do
+          Finch.build(method, url, headers, body)
+        else
+          Finch.build(method, url, headers)
+        end
+
       Finch.request(req, Orchestrator.Finch, receive_timeout: 5_000)
     end
   end
@@ -142,18 +159,21 @@ defmodule Orchestrator.RegionRouter do
   defp read_http_response(socket) do
     case read_headers(socket, nil, []) do
       {:ok, status, headers} ->
-        content_length = Enum.find_value(headers, fn
-          {:http_header, _, :"Content-Length", _, len} -> String.to_integer(len)
-          _ -> nil
-        end) || 0
+        content_length =
+          Enum.find_value(headers, fn
+            {:http_header, _, :"Content-Length", _, len} -> String.to_integer(len)
+            _ -> nil
+          end) || 0
 
         :inet.setopts(socket, [{:packet, :raw}])
 
         case :gen_tcp.recv(socket, content_length, 5000) do
           {:ok, body} ->
             {:ok, %{status: status, body: body}}
+
           {:error, :closed} when content_length == 0 ->
             {:ok, %{status: status, body: ""}}
+
           {:error, reason} ->
             {:error, reason}
         end
@@ -167,10 +187,13 @@ defmodule Orchestrator.RegionRouter do
     case :gen_tcp.recv(socket, 0, 5000) do
       {:ok, {:http_response, _, status_code, _}} ->
         read_headers(socket, status_code, headers)
+
       {:ok, {:http_header, _, _name, _, _value} = header} ->
         read_headers(socket, status, [header | headers])
+
       {:ok, :http_eoh} ->
         {:ok, status, headers}
+
       {:error, reason} ->
         {:error, reason}
     end

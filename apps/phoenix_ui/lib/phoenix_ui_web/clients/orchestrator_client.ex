@@ -38,10 +38,12 @@ defmodule PhoenixUiWeb.OrchestratorClient do
 
   defp request(method, path, body, attempt) do
     url = base_url() <> path
+
     headers = [
       {"content-type", "application/json"},
       {"authorization", "Bearer #{token()}"}
     ]
+
     body_data = if body, do: Jason.encode!(body), else: nil
 
     require OpenTelemetry.Tracer
@@ -61,6 +63,7 @@ defmodule PhoenixUiWeb.OrchestratorClient do
           Logger.warning(
             "[OrchestratorClient] Request error: #{inspect(reason)} attempt=#{attempt}"
           )
+
           backoff_and_retry(method, path, body, attempt)
       end
     end
@@ -79,7 +82,10 @@ defmodule PhoenixUiWeb.OrchestratorClient do
           make_tcp_request(ip_tuple, port, host, method, path, headers, body)
 
         {:error, reason} ->
-          Logger.error("[OrchestratorClient] IPv6 resolution failed for #{host}: #{inspect(reason)}")
+          Logger.error(
+            "[OrchestratorClient] IPv6 resolution failed for #{host}: #{inspect(reason)}"
+          )
+
           {:error, {:dns_error, reason}}
       end
     else
@@ -88,31 +94,43 @@ defmodule PhoenixUiWeb.OrchestratorClient do
   end
 
   defp make_finch_request(method, url, headers, body) do
-    req = if body do
-      Finch.build(method, url, headers, body)
-    else
-      Finch.build(method, url, headers)
-    end
+    req =
+      if body do
+        Finch.build(method, url, headers, body)
+      else
+        Finch.build(method, url, headers)
+      end
 
     case Finch.request(req, PhoenixUiWeb.Finch, receive_timeout: timeout()) do
       {:ok, %Finch.Response{status: status, body: resp_body}} ->
         {:ok, %{status: status, body: resp_body}}
+
       {:error, reason} ->
         {:error, reason}
     end
   end
 
   defp make_tcp_request(ip_tuple, port, host, method, path, headers, body) do
-    case :gen_tcp.connect(ip_tuple, port, [:binary, {:active, false}, {:packet, :http_bin}, :inet6], timeout()) do
+    case :gen_tcp.connect(
+           ip_tuple,
+           port,
+           [:binary, {:active, false}, {:packet, :http_bin}, :inet6],
+           timeout()
+         ) do
       {:ok, socket} ->
         request_line = "#{String.upcase(to_string(method))} #{path} HTTP/1.1\r\n"
         host_header = "Host: #{host}:#{port}\r\n"
 
         header_lines = Enum.map(headers, fn {k, v} -> "#{k}: #{v}\r\n" end) |> Enum.join()
         body_data = body || ""
-        content_length_header = if body, do: "Content-Length: #{byte_size(body_data)}\r\n", else: ""
 
-        http_request = request_line <> host_header <> header_lines <> content_length_header <> "Connection: close\r\n\r\n" <> body_data
+        content_length_header =
+          if body, do: "Content-Length: #{byte_size(body_data)}\r\n", else: ""
+
+        http_request =
+          request_line <>
+            host_header <>
+            header_lines <> content_length_header <> "Connection: close\r\n\r\n" <> body_data
 
         :ok = :gen_tcp.send(socket, http_request)
 
@@ -129,18 +147,21 @@ defmodule PhoenixUiWeb.OrchestratorClient do
   defp read_http_response(socket) do
     case read_headers(socket, nil, []) do
       {:ok, status, headers} ->
-        content_length = Enum.find_value(headers, fn
-          {:http_header, _, :"Content-Length", _, len} -> String.to_integer(len)
-          _ -> nil
-        end) || 0
+        content_length =
+          Enum.find_value(headers, fn
+            {:http_header, _, :"Content-Length", _, len} -> String.to_integer(len)
+            _ -> nil
+          end) || 0
 
         :inet.setopts(socket, [{:packet, :raw}])
 
         case :gen_tcp.recv(socket, content_length, timeout()) do
           {:ok, resp_body} ->
             {:ok, %{status: status, body: resp_body}}
+
           {:error, :closed} when content_length == 0 ->
             {:ok, %{status: status, body: ""}}
+
           {:error, reason} ->
             {:error, reason}
         end
@@ -154,10 +175,13 @@ defmodule PhoenixUiWeb.OrchestratorClient do
     case :gen_tcp.recv(socket, 0, timeout()) do
       {:ok, {:http_response, _, status_code, _}} ->
         read_headers(socket, status_code, headers)
+
       {:ok, {:http_header, _, _name, _, _value} = header} ->
         read_headers(socket, status, [header | headers])
+
       {:ok, :http_eoh} ->
         {:ok, status, headers}
+
       {:error, reason} ->
         {:error, reason}
     end

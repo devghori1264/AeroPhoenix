@@ -57,6 +57,7 @@ defmodule Orchestrator.MachineActor do
       case GenServer.call(server, :health_check, timeout) do
         :ok ->
           elapsed = System.monotonic_time(:millisecond) - start_time
+
           if elapsed > 1_000 do
             {:ok, :degraded}
           else
@@ -137,8 +138,8 @@ defmodule Orchestrator.MachineActor do
               case WAL.replay_uncommitted_intents(conn, current_state: recovered_state) do
                 {:ok, replay_result} ->
                   if replay_result.completed != [] ||
-                        replay_result.rolled_back != [] ||
-                        replay_result.conflicts != [] do
+                       replay_result.rolled_back != [] ||
+                       replay_result.conflicts != [] do
                     Logger.debug("MachineActor[#{id}] uncommitted intent replay complete",
                       completed: length(replay_result.completed),
                       rolled_back: length(replay_result.rolled_back),
@@ -162,6 +163,7 @@ defmodule Orchestrator.MachineActor do
                   Logger.error("MachineActor[#{id}] uncommitted intent replay failed",
                     reason: inspect(reason)
                   )
+
                   recovered_state
               end
 
@@ -254,50 +256,53 @@ defmodule Orchestrator.MachineActor do
               :ok ->
                 case state.operation_lock do
                   nil ->
-                    locked_state = %{state | operation_lock: {operation_id, from, transition_type}}
+                    locked_state = %{
+                      state
+                      | operation_lock: {operation_id, from, transition_type}
+                    }
 
-                wal_entry = %{
-                  operation_id: operation_id,
-                  from_state: current_state,
-                  to_state: target_state,
-                  transition_type: transition_type,
-                  opts: opts,
-                  timestamp: DateTime.utc_now(),
-                  status: :pending
-                }
-
-                case WAL.append(state.conn, wal_entry) do
-                  {:ok, wal_seq} ->
-                    Logger.debug("MachineActor[#{state.id}] WAL written",
+                    wal_entry = %{
                       operation_id: operation_id,
-                      transition: "#{current_state} -> #{target_state}",
-                      wal_seq: wal_seq
-                    )
+                      from_state: current_state,
+                      to_state: target_state,
+                      transition_type: transition_type,
+                      opts: opts,
+                      timestamp: DateTime.utc_now(),
+                      status: :pending
+                    }
 
-                    send(self(), {:execute_transition, operation_id, wal_entry, from})
+                    case WAL.append(state.conn, wal_entry) do
+                      {:ok, wal_seq} ->
+                        Logger.debug("MachineActor[#{state.id}] WAL written",
+                          operation_id: operation_id,
+                          transition: "#{current_state} -> #{target_state}",
+                          wal_seq: wal_seq
+                        )
 
-                    {:noreply, locked_state}
+                        send(self(), {:execute_transition, operation_id, wal_entry, from})
 
-                  {:error, reason} ->
-                    Logger.error("MachineActor[#{state.id}] WAL write failed",
-                      operation_id: operation_id,
-                      reason: inspect(reason)
-                    )
+                        {:noreply, locked_state}
 
-                    {:reply, {:error, {:wal_write_failed, reason}}, state}
+                      {:error, reason} ->
+                        Logger.error("MachineActor[#{state.id}] WAL write failed",
+                          operation_id: operation_id,
+                          reason: inspect(reason)
+                        )
+
+                        {:reply, {:error, {:wal_write_failed, reason}}, state}
+                    end
+
+                  {locked_op_id, _locked_from, _locked_type} ->
+                    {:reply, {:error, {:locked_by_operation, locked_op_id}}, state}
                 end
 
-              {locked_op_id, _locked_from, _locked_type} ->
-                {:reply, {:error, {:locked_by_operation, locked_op_id}}, state}
+              {:error, missing_cap} ->
+                {:reply, {:error, {:missing_capability, missing_cap}}, state}
             end
 
-          {:error, missing_cap} ->
-            {:reply, {:error, {:missing_capability, missing_cap}}, state}
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
         end
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}

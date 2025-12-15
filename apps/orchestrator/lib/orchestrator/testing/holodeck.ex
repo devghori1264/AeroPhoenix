@@ -386,7 +386,9 @@ defmodule Orchestrator.Testing.Holodeck do
       end
     end)
 
-    Logger.debug("Holodeck: Chaos scenario complete (killed #{length(machines_to_kill)} machines)")
+    Logger.debug(
+      "Holodeck: Chaos scenario complete (killed #{length(machines_to_kill)} machines)"
+    )
   end
 
   defp percentile(sorted_list, p) do

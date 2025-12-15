@@ -82,6 +82,7 @@ defmodule Orchestrator.Latency.HedgedRequest do
             target: inspect(primary_target),
             error: error
           )
+
           fire_hedges_and_wait(
             request_id,
             primary_task,
@@ -185,16 +186,16 @@ defmodule Orchestrator.Latency.HedgedRequest do
       poll_interval = min(10, deadline - now)
       results = Task.yield_many(tasks, poll_interval)
 
-      success = Enum.find(results, fn {_task, result} ->
-        match?({:ok, {:ok, _}}, result)
-      end)
+      success =
+        Enum.find(results, fn {_task, result} ->
+          match?({:ok, {:ok, _}}, result)
+        end)
 
       case success do
         {winning_task, {:ok, {:ok, value}}} ->
           {:ok, {:ok, value}, winning_task}
 
         nil ->
-
           {running_tasks, new_errors} =
             Enum.reduce(results, {[], errors}, fn
               {task, nil}, {acc_tasks, acc_errors} ->
@@ -207,7 +208,7 @@ defmodule Orchestrator.Latency.HedgedRequest do
                 {acc_tasks, [{:exit, reason} | acc_errors]}
 
               {_task, {:ok, _other}}, {acc_tasks, acc_errors} ->
-                 {acc_tasks, [:unexpected_result | acc_errors]}
+                {acc_tasks, [:unexpected_result | acc_errors]}
             end)
 
           poll_for_success(Enum.reverse(running_tasks), deadline, new_errors)

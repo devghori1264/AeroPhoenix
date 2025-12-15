@@ -144,32 +144,32 @@ defmodule Orchestrator.Migration.DirtyPageTracker do
   end
 
   @impl true
-    def handle_call({:stop_tracking, machine_id}, _from, state) do
-      case Map.get(state, machine_id) do
-        nil ->
-          {:reply, :ok, state}
+  def handle_call({:stop_tracking, machine_id}, _from, state) do
+    case Map.get(state, machine_id) do
+      nil ->
+        {:reply, :ok, state}
 
-        tracking_state ->
-          stats = %{
-            total_writes: tracking_state.total_writes,
-            total_pages_dirtied: tracking_state.total_pages_dirtied,
-            final_dirty_count: map_size(tracking_state.dirty_pages)
-          }
+      tracking_state ->
+        stats = %{
+          total_writes: tracking_state.total_writes,
+          total_pages_dirtied: tracking_state.total_pages_dirtied,
+          final_dirty_count: map_size(tracking_state.dirty_pages)
+        }
 
-          Logger.info("Stopping dirty page tracking",
-            machine_id: machine_id,
-            summary: stats
-          )
+        Logger.info("Stopping dirty page tracking",
+          machine_id: machine_id,
+          summary: stats
+        )
 
-          :telemetry.execute(
-            [:orchestrator, :migration, :dirty_tracking_stopped],
-            stats,
-            %{machine_id: machine_id}
-          )
+        :telemetry.execute(
+          [:orchestrator, :migration, :dirty_tracking_stopped],
+          stats,
+          %{machine_id: machine_id}
+        )
 
-          {:reply, :ok, Map.delete(state, machine_id)}
-      end
+        {:reply, :ok, Map.delete(state, machine_id)}
     end
+  end
 
   @impl true
   def handle_cast({:mark_dirty, machine_id, offset, length}, state) do

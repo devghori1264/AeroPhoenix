@@ -37,7 +37,9 @@ defmodule Orchestrator.MachineActor.Supervisor do
         case Orchestrator.ResourceManager.reserve_resources(id, resources) do
           {:ok, _} ->
             restart_strategy = Keyword.get(opts, :restart, :permanent)
-            child_spec = Supervisor.child_spec({Orchestrator.MachineActor, opts}, restart: restart_strategy)
+
+            child_spec =
+              Supervisor.child_spec({Orchestrator.MachineActor, opts}, restart: restart_strategy)
 
             case DynamicSupervisor.start_child(__MODULE__, child_spec) do
               {:ok, pid} ->

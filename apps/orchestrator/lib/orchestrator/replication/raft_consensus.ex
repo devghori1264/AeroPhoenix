@@ -1,18 +1,22 @@
 defmodule Orchestrator.Replication.RaftConsensus do
   use GenServer
   require Logger
+
   defp election_timeout_min do
     Application.get_env(:orchestrator, :raft, []) |> Keyword.get(:election_timeout_ms, 150)
   end
 
   defp election_timeout_max do
     min = election_timeout_min()
-    Application.get_env(:orchestrator, :raft, []) |> Keyword.get(:election_timeout_max_ms, min * 2)
+
+    Application.get_env(:orchestrator, :raft, [])
+    |> Keyword.get(:election_timeout_max_ms, min * 2)
   end
 
   defp heartbeat_interval do
     Application.get_env(:orchestrator, :raft, []) |> Keyword.get(:heartbeat_interval_ms, 50)
   end
+
   defmodule State do
     defstruct [
       :current_term,
@@ -248,7 +252,10 @@ defmodule Orchestrator.Replication.RaftConsensus do
 
   defp reset_election_timer(state) do
     if state.election_timer, do: Process.cancel_timer(state.election_timer)
-    timeout = :rand.uniform(election_timeout_max() - election_timeout_min() + 1) + election_timeout_min()
+
+    timeout =
+      :rand.uniform(election_timeout_max() - election_timeout_min() + 1) + election_timeout_min()
+
     timer = Process.send_after(self(), :election_timeout, timeout)
     %{state | election_timer: timer}
   end
@@ -282,6 +289,7 @@ defmodule Orchestrator.Replication.RaftConsensus do
     }
 
     me = self()
+
     Enum.each(state.cluster_nodes, fn node ->
       Task.start(fn ->
         response = request_vote(node, request)
@@ -402,6 +410,7 @@ defmodule Orchestrator.Replication.RaftConsensus do
       }
 
       me = self()
+
       Task.start(fn ->
         response = append_entries(node, request)
         send(me, {:append_response, node, response})

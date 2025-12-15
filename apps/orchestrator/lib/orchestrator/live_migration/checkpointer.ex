@@ -70,7 +70,8 @@ defmodule Orchestrator.LiveMigration.Checkpointer do
         compressed_size_bytes: compressed_size,
         checksum: checksum,
         created_at: DateTime.utc_now(),
-        parent_checkpoint_id: Map.get(opts, :parent_checkpoint_id) || Map.get(opts, :base_checkpoint)
+        parent_checkpoint_id:
+          Map.get(opts, :parent_checkpoint_id) || Map.get(opts, :base_checkpoint)
       }
 
       case store_checkpoint(checkpoint_id, final_data, metadata) do

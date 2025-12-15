@@ -137,7 +137,7 @@
           <div class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div>
           <span class="text-xs font-mono text-rose-400">LIVE CONNECTION</span>
         </div>
-        
+
         <PhoenixUiWeb.Layouts.theme_toggle />
       </div>
     </header>
@@ -157,7 +157,7 @@
               <div class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-#{tab.color}-500 rounded-r-full shadow-[0_0_10px_#{tab.color}]">
               </div>
             <% end %>
-            
+
             <div class={[
               "relative z-10 transition-transform duration-300 group-hover:scale-110",
               if(@active_tab == tab.id,
@@ -173,10 +173,9 @@
           </button>
         <% end %>
       </nav>
-      
+
       <main class="flex-1 overflow-y-auto overflow-x-hidden relative scroll-smooth">
         <div class="p-6 lg:p-8 max-w-[1920px] mx-auto min-h-full">
-          
           <div class="mb-8 flex items-end justify-between animate-fade-in-up">
             <div>
               <h2 class="text-3xl font-bold text-white mb-2 flex items-center gap-3">
@@ -214,7 +213,7 @@
                 <% end %>
               </p>
             </div>
-            
+
             <div class="flex items-center gap-3">
               <%= if @active_tab == "overview" do %>
                 <button class="px-4 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 transition-all flex items-center gap-2 text-sm font-medium">
@@ -224,14 +223,16 @@
               <% end %>
             </div>
           </div>
-          
+
           <div class="animate-fade-in-up animation-delay-200">
             <%= case @active_tab do %>
               <% "overview" -> %>
                 <div class="grid grid-cols-12 gap-6">
-
                   <div class="col-span-12 lg:col-span-8 space-y-6">
-                    <div class="topology-wrapper relative group" style="min-height: 600px; background: var(--bg-panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border-radius: 0.75rem; padding: 0;">
+                    <div
+                      class="topology-wrapper relative group"
+                      style="min-height: 600px; background: var(--bg-panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border-radius: 0.75rem; padding: 0;"
+                    >
                       <div class="absolute top-4 left-4 z-30 flex gap-2">
                         <div class="px-2 py-1 rounded bg-black/50 border border-white/10 text-[10px] text-cyan-400 font-mono">
                           LIVE MAP
@@ -246,7 +247,7 @@
 
                     <PhoenixUiWeb.CreateMachineForm.render regions={@regions} />
                   </div>
-                  
+
                   <div class="col-span-12 lg:col-span-4 space-y-6">
                     <PhoenixUiWeb.MachineCardEnhanced.render machine={@selected} />
 
@@ -308,7 +309,10 @@
                   total_connections={@total_connections}
                 />
               <% "topology" -> %>
-                <div class="topology-wrapper" style="height: 80vh; background: var(--bg-panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border-radius: 0.75rem; padding: 0;">
+                <div
+                  class="topology-wrapper"
+                  style="height: 80vh; background: var(--bg-panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border-radius: 0.75rem; padding: 0;"
+                >
                   <PhoenixUiWeb.TopologyComponent.render
                     regions={@regions}
                     machines={@machines}
@@ -416,7 +420,7 @@
         </div>
       </main>
     </div>
-    
+
     <ul
       id="toast-container"
       phx-hook="ToastHook"
@@ -435,7 +439,7 @@
         </li>
       <% end %>
     </ul>
-    
+
     <%= if @chaos_modal_open do %>
       <div
         class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
@@ -445,7 +449,6 @@
           phx-click="modal-content-click"
           class="glass-panel w-full max-w-lg rounded-2xl border border-rose-500/30 shadow-[0_0_50px_rgba(244,63,94,0.2)] animate-fade-in-up overflow-hidden"
         >
-
           <div class="bg-rose-500/10 border-b border-rose-500/20 p-6 flex items-center justify-between">
             <div class="flex items-center gap-3">
               <div class="p-2 rounded-lg bg-rose-500/20 text-rose-400">

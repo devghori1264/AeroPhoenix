@@ -23,11 +23,13 @@ defmodule Orchestrator.ResourceScenariosTest do
 
   setup do
     case Process.whereis(Orchestrator.Placement.ResourceManager) do
-      nil -> :ok
+      nil ->
+        :ok
+
       _pid ->
-         Supervisor.terminate_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
-         Supervisor.restart_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
-         wait_until(fn -> Process.whereis(Orchestrator.Placement.ResourceManager) != nil end)
+        Supervisor.terminate_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
+        Supervisor.restart_child(Orchestrator.Supervisor, Orchestrator.ResourceManager)
+        wait_until(fn -> Process.whereis(Orchestrator.Placement.ResourceManager) != nil end)
     end
 
     cleanup_all_resources()
@@ -48,7 +50,6 @@ defmodule Orchestrator.ResourceScenariosTest do
     |> Enum.each(fn id ->
       MachActorSup.stop_machine(id)
     end)
-
   end
 
   describe "capacity exhaustion" do
@@ -90,7 +91,8 @@ defmodule Orchestrator.ResourceScenariosTest do
       result =
         MachActorSup.start_machine(
           id: "overflow-machine",
-          region: "test-region", size: %{cpu_count: 0.5, memory_mb: 1024, disk_mb: 5120}
+          region: "test-region",
+          size: %{cpu_count: 0.5, memory_mb: 1024, disk_mb: 5120}
         )
 
       assert match?({:ok, _}, result) or match?({:error, :insufficient_memory, _}, result)
@@ -105,7 +107,8 @@ defmodule Orchestrator.ResourceScenariosTest do
       {:ok, _pid1} =
         MachActorSup.start_machine(
           id: "temp-machine-1",
-          region: "test-region", size: %{cpu_count: 2.0, memory_mb: 4096, disk_mb: 10_240}
+          region: "test-region",
+          size: %{cpu_count: 2.0, memory_mb: 4096, disk_mb: 10_240}
         )
 
       capacity_before = ResourceManager.get_capacity()
@@ -136,7 +139,8 @@ defmodule Orchestrator.ResourceScenariosTest do
         for i <- 1..machines_needed do
           MachActorSup.start_machine(
             id: "cpu-overcommit-#{i}",
-            region: "test-region", size: %{cpu_count: 2.0, memory_mb: 512, disk_mb: 2048},
+            region: "test-region",
+            size: %{cpu_count: 2.0, memory_mb: 512, disk_mb: 2048},
             queue_on_exhaustion: true
           )
         end
@@ -201,7 +205,8 @@ defmodule Orchestrator.ResourceScenariosTest do
           Task.async(fn ->
             MachActorSup.start_machine(
               id: "concurrent-#{i}",
-              region: "test-region", size: %{cpu_count: 0.25, memory_mb: 512, disk_mb: 1024}
+              region: "test-region",
+              size: %{cpu_count: 0.25, memory_mb: 512, disk_mb: 1024}
             )
           end)
         end
@@ -233,7 +238,8 @@ defmodule Orchestrator.ResourceScenariosTest do
           Task.async(fn ->
             MachActorSup.start_machine(
               id: "duplicate-machine",
-              region: "test-region", size: %{cpu_count: 1.0, memory_mb: 1024, disk_mb: 2048}
+              region: "test-region",
+              size: %{cpu_count: 1.0, memory_mb: 1024, disk_mb: 2048}
             )
           end)
         end
@@ -241,9 +247,11 @@ defmodule Orchestrator.ResourceScenariosTest do
       results = Task.await_many(tasks, 5000)
 
       successes = Enum.count(results, fn res -> match?({:ok, _}, res) end)
-      already_exists = Enum.count(results, fn res ->
-        match?({:error, :already_exists}, res) or match?({:error, {:already_started, _}}, res)
-      end)
+
+      already_exists =
+        Enum.count(results, fn res ->
+          match?({:error, :already_exists}, res) or match?({:error, {:already_started, _}}, res)
+        end)
 
       assert successes == 1, "Expected exactly 1 success, got #{successes}"
 
@@ -255,7 +263,8 @@ defmodule Orchestrator.ResourceScenariosTest do
       {:ok, _pid} =
         MachActorSup.start_machine(
           id: "race-machine",
-          region: "test-region", size: %{cpu_count: 1.0, memory_mb: 2048, disk_mb: 5120}
+          region: "test-region",
+          size: %{cpu_count: 1.0, memory_mb: 2048, disk_mb: 5120}
         )
 
       tasks = [
@@ -279,7 +288,8 @@ defmodule Orchestrator.ResourceScenariosTest do
       for i <- 1..machines_to_fill do
         MachActorSup.start_machine(
           id: "filler-#{i}",
-          region: "test-region", size: %{cpu_count: 0.5, memory_mb: 2048, disk_mb: 5120}
+          region: "test-region",
+          size: %{cpu_count: 0.5, memory_mb: 2048, disk_mb: 5120}
         )
       end
 
@@ -328,7 +338,8 @@ defmodule Orchestrator.ResourceScenariosTest do
       for i <- 1..machines_to_fill do
         MachActorSup.start_machine(
           id: "pri-filler-#{i}",
-          region: "test-region", size: %{cpu_count: 0.5, memory_mb: 2048, disk_mb: 5120}
+          region: "test-region",
+          size: %{cpu_count: 0.5, memory_mb: 2048, disk_mb: 5120}
         )
       end
 
@@ -386,7 +397,8 @@ defmodule Orchestrator.ResourceScenariosTest do
       {:ok, _} =
         MachActorSup.start_machine(
           id: "large-machine",
-          region: "test-region", size: %{cpu_count: 8.0, memory_mb: 32_768, disk_mb: 102_400}
+          region: "test-region",
+          size: %{cpu_count: 8.0, memory_mb: 32_768, disk_mb: 102_400}
         )
 
       {:ok, region} =
@@ -426,7 +438,8 @@ defmodule Orchestrator.ResourceScenariosTest do
       for i <- 1..large_count do
         MachActorSup.start_machine(
           id: "large-#{i}",
-          region: "test-region", size: %{cpu_count: 2.0, memory_mb: 8192, disk_mb: 20_480}
+          region: "test-region",
+          size: %{cpu_count: 2.0, memory_mb: 8192, disk_mb: 20_480}
         )
       end
 
@@ -436,7 +449,8 @@ defmodule Orchestrator.ResourceScenariosTest do
         for i <- 1..5 do
           MachActorSup.start_machine(
             id: "small-#{i}",
-            region: "test-region", size: %{cpu_count: 0.25, memory_mb: 512, disk_mb: 1024}
+            region: "test-region",
+            size: %{cpu_count: 0.25, memory_mb: 512, disk_mb: 1024}
           )
         end
 
@@ -464,7 +478,8 @@ defmodule Orchestrator.ResourceScenariosTest do
       {:ok, _} =
         MachActorSup.start_machine(
           id: "util-test",
-          region: "test-region", size: %{cpu_count: 4.0, memory_mb: 16_384, disk_mb: 51_200}
+          region: "test-region",
+          size: %{cpu_count: 4.0, memory_mb: 16_384, disk_mb: 51_200}
         )
 
       capacity = ResourceManager.get_capacity()

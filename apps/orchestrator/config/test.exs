@@ -42,11 +42,9 @@ config :orchestrator, :circuit_breaker,
   error_threshold: 50,
   reset_timeout_ms: 100
 
-
 config :orchestrator, :machine_data_dir, "tmp/test_machines"
 config :orchestrator, :machine_actor_data_dir, "tmp/test_machines"
 config :orchestrator, :storage_path, "tmp/test_machines/"
-
 
 config :orchestrator, :resource_manager,
   cpu_cores: 1000.0,

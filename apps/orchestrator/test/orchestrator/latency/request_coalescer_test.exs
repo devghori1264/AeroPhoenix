@@ -8,6 +8,7 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
       {:ok, _} -> :ok
       {:error, {:already_started, _}} -> :ok
     end
+
     :ok
   end
 
@@ -170,6 +171,7 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
 
     test "does not deduplicate different requests" do
       test_pid = self()
+
       executor_fn = fn requests ->
         send(test_pid, {:batch_requests, requests})
         Map.new(requests, fn req_id -> {req_id, {:ok, %{id: req_id}}} end)
@@ -368,6 +370,7 @@ defmodule Orchestrator.Latency.RequestCoalescerTest do
 
     test "handles empty batch gracefully" do
       test_pid = self()
+
       executor_fn = fn _requests ->
         send(test_pid, :batch_executed)
         %{}

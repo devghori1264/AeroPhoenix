@@ -11,10 +11,18 @@ defmodule Orchestrator.Manager do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
   end
 
-
-
-  def create_machine(name, region, machine_type \\ "standard", cpu_size \\ "dedicated-cpu-1x", memory_mb \\ 512) do
-    GenServer.call(__MODULE__, {:create_machine, name, region, machine_type, cpu_size, memory_mb}, 10_000)
+  def create_machine(
+        name,
+        region,
+        machine_type \\ "standard",
+        cpu_size \\ "dedicated-cpu-1x",
+        memory_mb \\ 512
+      ) do
+    GenServer.call(
+      __MODULE__,
+      {:create_machine, name, region, machine_type, cpu_size, memory_mb},
+      10_000
+    )
   end
 
   def get_machine(id), do: Repo.get(Machine, id)
@@ -105,7 +113,11 @@ defmodule Orchestrator.Manager do
   end
 
   @impl true
-  def handle_call({:create_machine, name, region, machine_type, cpu_size, memory_mb}, _from, state) do
+  def handle_call(
+        {:create_machine, name, region, machine_type, cpu_size, memory_mb},
+        _from,
+        state
+      ) do
     Logger.info(
       "Handling create_machine call for name: #{name}, region: #{region}, type: #{machine_type}, cpu: #{cpu_size}, memory: #{memory_mb}MB"
     )

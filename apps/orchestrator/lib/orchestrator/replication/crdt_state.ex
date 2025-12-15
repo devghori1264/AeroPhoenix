@@ -224,7 +224,6 @@ defmodule Orchestrator.Replication.CRDTState do
         {:error, :not_found}
 
       tags ->
-
         new_hlc = HybridLogicalClock.tick(crdt.hlc)
         new_vclock = VectorClock.increment(crdt.vclock, crdt.node_id)
 
@@ -379,6 +378,7 @@ defmodule Orchestrator.Replication.CRDTState do
   def compress_delta(delta) do
     {:ok, do_compress_delta(delta)}
   end
+
   def decompress_delta(delta) do
     {:ok, maybe_decompress_delta(delta)}
   end

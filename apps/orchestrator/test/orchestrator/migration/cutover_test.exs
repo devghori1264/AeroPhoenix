@@ -7,7 +7,7 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
 
   setup do
     start_supervised!(Orchestrator.FlydSim)
-    
+
     if :ets.info(:routing_table) == :undefined do
       RoutingTable.init()
     end
@@ -119,16 +119,19 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
         ])
 
       IO.inspect(Orchestrator.MachineRegistry.get_pid(dest), label: "DEBUG: get_pid(#{dest})")
+
       case Orchestrator.MachineRegistry.get_pid(dest) do
         {:ok, pid} ->
           IO.puts("DEBUG: Terminating existing dest machine #{inspect(pid)}")
           DynamicSupervisor.terminate_child(Orchestrator.MachineActor.Supervisor, pid)
           ref = Process.monitor(pid)
+
           receive do
             {:DOWN, ^ref, :process, ^pid, _} -> :ok
           after
             1000 -> :ok
           end
+
         {:error, reason} ->
           IO.puts("DEBUG: Could not find dest machine: #{inspect(reason)}")
           :ok
@@ -241,6 +244,7 @@ defmodule Orchestrator.Migration.CutoverCoordinatorTest do
       end)
 
       base_id = String.replace(source, "_iad", "")
+
       routes_observed =
         for _ <- 1..20 do
           case RoutingTable.lookup(base_id) do
