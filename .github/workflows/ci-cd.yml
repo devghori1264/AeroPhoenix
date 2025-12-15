@@ -1072,6 +1072,11 @@ jobs:
       - name: 🚀 Deploy ${{ matrix.service }}
         if: steps.should_deploy_service.outputs.should_deploy == 'true'
         id: deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_REGISTRY_HOST: ghcr.io
+          FLY_REGISTRY_USERNAME: ${{ github.actor }}
+          FLY_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd ${{ matrix.working_dir }}
           
@@ -1208,7 +1213,7 @@ jobs:
             }
 
   verify:
-    name: ✅ Verify Deployment
+    name: Verify Deployment
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [deploy]
