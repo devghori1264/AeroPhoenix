@@ -1,6 +1,6 @@
 module github.com/devghori1264/aerophoenix/flyd-sim
 
-go 1.22
+go 1.23.0
 
 require (
 	github.com/dgraph-io/badger/v4 v4.8.0

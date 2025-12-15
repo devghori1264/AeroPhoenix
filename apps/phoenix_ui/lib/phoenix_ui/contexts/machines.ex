@@ -185,11 +185,10 @@ defmodule PhoenixUi.Machines do
           dt
 
         s when is_binary(s) ->
-          case DateTime.from_iso8601(s),
-            do: (
-              {:ok, dt, _} -> dt
-              _ -> DateTime.utc_now()
-            )
+          case DateTime.from_iso8601(s) do
+            {:ok, dt, _} -> dt
+            _ -> DateTime.utc_now()
+          end
 
         _ ->
           DateTime.utc_now()
