@@ -2,44 +2,26 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
   use Ecto.Migration
 
   def up do
-    execute("CREATE TYPE flag_status AS ENUM ('active', 'inactive', 'archived', 'deprecated')")
-
-    execute(
-      "CREATE TYPE flag_type AS ENUM ('boolean', 'string', 'number', 'json', 'multivariate')"
-    )
-
-    execute(
-      "CREATE TYPE rollout_strategy AS ENUM ('all', 'percentage', 'user_list', 'user_attribute', 'segment', 'gradual', 'ring')"
-    )
-
-    execute(
-      "CREATE TYPE experiment_status AS ENUM ('draft', 'running', 'paused', 'completed', 'winner_selected')"
-    )
-
-    execute(
-      "CREATE TYPE targeting_operator AS ENUM ('equals', 'not_equals', 'contains', 'not_contains', 'in', 'not_in', 'greater_than', 'less_than', 'regex_match', 'semver_match')"
-    )
-
     create table(:feature_flags, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
       add(:key, :string, null: false)
       add(:name, :string, null: false)
       add(:description, :text)
-      add(:status, :flag_status, null: false, default: "inactive")
-      add(:flag_type, :flag_type, null: false, default: "boolean")
+      add(:status, :string, null: false, default: "inactive")
+      add(:flag_type, :string, null: false, default: "boolean")
       add(:version, :integer, null: false, default: 1)
       add(:previous_version_id, references(:feature_flags, type: :uuid, on_delete: :nilify_all))
       add(:default_value_boolean, :boolean, default: false)
       add(:default_value_string, :string)
       add(:default_value_number, :decimal)
-      add(:default_value_json, :jsonb)
-      add(:rollout_strategy, :rollout_strategy, null: false, default: "all")
+      add(:default_value_json, :map)
+      add(:rollout_strategy, :string, null: false, default: "all")
       add(:rollout_percentage, :decimal, default: 0.0)
-      add(:gradual_rollout_config, :jsonb)
+      add(:gradual_rollout_config, :map)
       add(:owner, :string)
       add(:team, :string)
       add(:tags, {:array, :string}, default: [])
-      add(:metadata, :jsonb, default: "{}")
+      add(:metadata, :map, default: %{})
       add(:enabled_at, :utc_datetime_usec)
       add(:disabled_at, :utc_datetime_usec)
       add(:expires_at, :utc_datetime_usec)
@@ -54,28 +36,24 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     create(index(:feature_flags, [:rollout_strategy]))
     create(index(:feature_flags, [:owner]))
     create(index(:feature_flags, [:team]))
-    create(index(:feature_flags, [:tags], using: :gin))
     create(index(:feature_flags, [:enabled_at]))
     create(index(:feature_flags, [:expires_at]))
 
-    execute("""
-    ALTER TABLE feature_flags
-    ADD CONSTRAINT rollout_percentage_range
-    CHECK (rollout_percentage >= 0 AND rollout_percentage <= 100)
-    """)
+    # Removed CHECK constraint for SQLite simplicity or added via raw sql if strictly needed,
+    # but strictly optional for 'up' to assume valid data.
 
     create table(:flag_targeting_rules, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
       add(:flag_id, references(:feature_flags, type: :uuid, on_delete: :delete_all), null: false)
       add(:priority, :integer, null: false, default: 0)
       add(:enabled, :boolean, null: false, default: true)
       add(:name, :string)
       add(:description, :text)
-      add(:conditions, :jsonb, null: false, default: "[]")
+      add(:conditions, :map, null: false, default: [])
       add(:variation_value_boolean, :boolean)
       add(:variation_value_string, :string)
       add(:variation_value_number, :decimal)
-      add(:variation_value_json, :jsonb)
+      add(:variation_value_json, :map)
       add(:rollout_percentage, :decimal, default: 100.0)
       timestamps(type: :utc_datetime_usec)
     end
@@ -85,18 +63,12 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     create(index(:flag_targeting_rules, [:enabled]))
     create(index(:flag_targeting_rules, [:flag_id, :priority]))
 
-    execute("""
-    ALTER TABLE flag_targeting_rules
-    ADD CONSTRAINT rule_rollout_percentage_range
-    CHECK (rollout_percentage >= 0 AND rollout_percentage <= 100)
-    """)
-
     create table(:user_segments, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
       add(:key, :string, null: false)
       add(:name, :string, null: false)
       add(:description, :text)
-      add(:conditions, :jsonb, null: false, default: "[]")
+      add(:conditions, :map, null: false, default: [])
       add(:owner, :string)
       add(:tags, {:array, :string}, default: [])
       add(:estimated_size, :integer)
@@ -106,18 +78,17 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
 
     create(unique_index(:user_segments, [:key]))
     create(index(:user_segments, [:owner]))
-    create(index(:user_segments, [:tags], using: :gin))
 
     create table(:experiments, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
       add(:flag_id, references(:feature_flags, type: :uuid, on_delete: :delete_all), null: false)
       add(:key, :string, null: false)
       add(:name, :string, null: false)
       add(:description, :text)
       add(:hypothesis, :text)
-      add(:status, :experiment_status, null: false, default: "draft")
+      add(:status, :string, null: false, default: "draft")
       add(:traffic_allocation, :decimal, null: false, default: 100.0)
-      add(:variations, :jsonb, null: false)
+      add(:variations, :map, null: false)
       add(:primary_metric, :string)
       add(:secondary_metrics, {:array, :string}, default: [])
       add(:minimum_sample_size, :integer, default: 1000)
@@ -139,20 +110,8 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     create(index(:experiments, [:started_at]))
     create(index(:experiments, [:ended_at]))
 
-    execute("""
-    ALTER TABLE experiments
-    ADD CONSTRAINT traffic_allocation_range
-    CHECK (traffic_allocation >= 0 AND traffic_allocation <= 100)
-    """)
-
-    execute("""
-    ALTER TABLE experiments
-    ADD CONSTRAINT confidence_level_range
-    CHECK (confidence_level >= 0 AND confidence_level <= 100)
-    """)
-
     create table(:experiment_results, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
 
       add(:experiment_id, references(:experiments, type: :uuid, on_delete: :delete_all),
         null: false
@@ -192,15 +151,15 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     )
 
     create table(:flag_evaluations, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
       add(:flag_id, references(:feature_flags, type: :uuid, on_delete: :delete_all), null: false)
       add(:flag_key, :string, null: false)
       add(:user_id, :string)
       add(:machine_id, :string)
       add(:session_id, :string)
-      add(:context, :jsonb, default: "{}")
+      add(:context, :map, default: %{})
       add(:variation_key, :string)
-      add(:variation_value, :jsonb)
+      add(:variation_value, :map)
       add(:matched_rule_id, :uuid)
       add(:reason, :string)
       add(:experiment_id, :uuid)
@@ -209,11 +168,7 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
       add(:evaluation_duration_us, :integer)
     end
 
-    execute("""
-    CREATE INDEX flag_evaluations_evaluated_at_idx
-    ON flag_evaluations (evaluated_at DESC)
-    """)
-
+    create(index(:flag_evaluations, [:evaluated_at]))
     create(index(:flag_evaluations, [:flag_id]))
     create(index(:flag_evaluations, [:flag_key]))
     create(index(:flag_evaluations, [:user_id]))
@@ -222,7 +177,7 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     create(index(:flag_evaluations, [:in_experiment]))
 
     create table(:metric_events, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
       add(:experiment_id, references(:experiments, type: :uuid, on_delete: :delete_all))
       add(:flag_id, references(:feature_flags, type: :uuid, on_delete: :delete_all))
       add(:metric_name, :string, null: false)
@@ -232,7 +187,7 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
       add(:session_id, :string)
       add(:variation_key, :string)
       add(:value, :decimal)
-      add(:properties, :jsonb, default: "{}")
+      add(:properties, :map, default: %{})
       add(:occurred_at, :utc_datetime_usec, null: false)
       add(:source, :string)
     end
@@ -244,16 +199,16 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     create(index(:metric_events, [:variation_key]))
 
     create table(:flag_audit_logs, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
       add(:flag_id, references(:feature_flags, type: :uuid, on_delete: :delete_all), null: false)
       add(:flag_key, :string, null: false)
       add(:action, :string, null: false)
-      add(:changes, :jsonb)
+      add(:changes, :map)
       add(:actor, :string, null: false)
       add(:actor_type, :string)
       add(:ip_address, :string)
       add(:reason, :text)
-      add(:metadata, :jsonb, default: "{}")
+      add(:metadata, :map, default: %{})
       add(:occurred_at, :utc_datetime_usec, null: false)
     end
 
@@ -264,13 +219,13 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     create(index(:flag_audit_logs, [:occurred_at]))
 
     create table(:flag_overrides, primary_key: false) do
-      add(:id, :uuid, primary_key: true, default: fragment("uuid_generate_v4()"))
+      add(:id, :uuid, primary_key: true)
       add(:flag_id, references(:feature_flags, type: :uuid, on_delete: :delete_all), null: false)
       add(:flag_key, :string, null: false)
       add(:user_id, :string)
       add(:machine_id, :string)
       add(:segment_id, :uuid)
-      add(:override_value, :jsonb, null: false)
+      add(:override_value, :map, null: false)
       add(:enabled, :boolean, null: false, default: true)
       add(:expires_at, :utc_datetime_usec)
       add(:created_by, :string)
@@ -285,80 +240,10 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     create(index(:flag_overrides, [:enabled]))
     create(index(:flag_overrides, [:expires_at]))
 
-    execute("""
-    ALTER TABLE flag_overrides
-    ADD CONSTRAINT override_target_required
-    CHECK (
-      user_id IS NOT NULL OR
-      machine_id IS NOT NULL OR
-      segment_id IS NOT NULL
-    )
-    """)
-
-    execute("""
-    CREATE OR REPLACE FUNCTION consistent_hash(key TEXT, max_value INTEGER)
-    RETURNS INTEGER AS $$
-    DECLARE
-      hash_bytes BYTEA;
-      hash_int BIGINT;
-    BEGIN
-      hash_bytes := digest(key, 'sha256');
-      hash_int := ('x' || encode(substring(hash_bytes, 1, 8), 'hex'))::bit(64)::bigint;
-      RETURN abs(hash_int) % max_value;
-    END;
-    $$ LANGUAGE plpgsql IMMUTABLE;
-    """)
-
-    execute("""
-    CREATE OR REPLACE FUNCTION is_in_rollout(
-      flag_key TEXT,
-      user_id TEXT,
-      rollout_percentage DECIMAL
-    )
-    RETURNS BOOLEAN AS $$
-    DECLARE
-      hash_value INTEGER;
-    BEGIN
-      IF rollout_percentage >= 100 THEN
-        RETURN TRUE;
-      END IF;
-      IF rollout_percentage <= 0 THEN
-        RETURN FALSE;
-      END IF;
-      hash_value := consistent_hash(flag_key || ':' || user_id, 10000);
-      RETURN (hash_value / 100.0) < rollout_percentage;
-    END;
-    $$ LANGUAGE plpgsql IMMUTABLE;
-    """)
-
-    execute("""
-    CREATE MATERIALIZED VIEW flag_statistics AS
-    SELECT
-      f.id AS flag_id,
-      f.key AS flag_key,
-      f.name,
-      f.status,
-      COUNT(DISTINCT fe.user_id) AS unique_users,
-      COUNT(DISTINCT fe.machine_id) AS unique_machines,
-      COUNT(*) AS total_evaluations,
-      COUNT(*) FILTER (WHERE fe.variation_value::text = 'true') AS enabled_count,
-      COUNT(*) FILTER (WHERE fe.variation_value::text = 'false') AS disabled_count,
-      MAX(fe.evaluated_at) AS last_evaluated_at,
-      MIN(fe.evaluated_at) AS first_evaluated_at
-    FROM feature_flags f
-    LEFT JOIN flag_evaluations fe ON f.id = fe.flag_id
-    WHERE fe.evaluated_at >= NOW() - INTERVAL '7 days'
-    GROUP BY f.id, f.key, f.name, f.status
-    """)
-
-    create(index(:flag_statistics, [:flag_id], unique: true))
-    create(index(:flag_statistics, [:flag_key]))
+    # Removed materialized view flag_statistics needed for Postgres
   end
 
   def down do
-    execute("DROP MATERIALIZED VIEW IF EXISTS flag_statistics")
-    execute("DROP FUNCTION IF EXISTS is_in_rollout(TEXT, TEXT, DECIMAL)")
-    execute("DROP FUNCTION IF EXISTS consistent_hash(TEXT, INTEGER)")
     drop(table(:flag_overrides))
     drop(table(:flag_audit_logs))
     drop(table(:metric_events))
@@ -368,10 +253,5 @@ defmodule Orchestrator.Repo.Migrations.CreateFeatureFlagSystem do
     drop(table(:user_segments))
     drop(table(:flag_targeting_rules))
     drop(table(:feature_flags))
-    execute("DROP TYPE IF EXISTS targeting_operator")
-    execute("DROP TYPE IF EXISTS experiment_status")
-    execute("DROP TYPE IF EXISTS rollout_strategy")
-    execute("DROP TYPE IF EXISTS flag_type")
-    execute("DROP TYPE IF EXISTS flag_status")
   end
 end
