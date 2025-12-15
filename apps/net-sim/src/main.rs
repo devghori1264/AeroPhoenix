@@ -246,7 +246,7 @@ async fn handle_chaos_inject(
                 tokio::spawn(async move {
                     let mut counter = 0u64;
                     loop {
-                        if counter % 100_000_000 == 0 {
+                        if counter.is_multiple_of(100_000_000) {
                             if !state_clone
                                 .active_incidents
                                 .read()

@@ -1,6 +1,6 @@
 module github.com/devghori1264/aerophoenix/cli/aeropctl
 
-go 1.25.3
+go 1.23.0
 
 require (
 	github.com/briandowns/spinner v1.23.0
