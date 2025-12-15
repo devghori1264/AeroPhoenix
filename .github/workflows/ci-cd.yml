@@ -311,7 +311,7 @@ jobs:
             fi
           fi
 
-          echo "services=${SERVICES_JSON}" >> $GITHUB_OUTPUT
+          echo "services=$(echo "$SERVICES_JSON" | jq -c .)" >> $GITHUB_OUTPUT
           echo "should_deploy=${SHOULD_DEPLOY}" >> $GITHUB_OUTPUT
 
           echo "Changed Services:"
