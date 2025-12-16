@@ -166,23 +166,27 @@ const TopologyHook = {
     }
 
     const controls = document.createElement('div');
-    controls.className = 'topology-zoom-controls';
+    controls.className = 'topology-zoom-controls btn-group-vertical';
     controls.innerHTML = `
-      <button class="zoom-btn" data-action="zoom-in" title="Zoom In">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <button class="zoom-btn-3d top" data-action="zoom-in" title="Zoom In" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          <line x1="11" y1="8" x2="11" y2="14"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
         </svg>
       </button>
-      <button class="zoom-btn" data-action="zoom-out" title="Zoom Out">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <button class="zoom-btn-3d middle" data-action="zoom-reset" title="Reset View" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
         </svg>
       </button>
-      <span class="zoom-divider"></span>
-      <button class="zoom-btn" data-action="zoom-reset" title="Reset View">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <rect x="2" y="2" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
-          <circle cx="7" cy="7" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+      <button class="zoom-btn-3d bottom" data-action="zoom-out" title="Zoom Out" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
         </svg>
       </button>
     `;

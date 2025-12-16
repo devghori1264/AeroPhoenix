@@ -14,7 +14,6 @@ defmodule PhoenixUiWeb.TopologyComponent do
         Jason.encode!(%{regions: @regions, machines: @machines, active_chaos: @active_chaos})
       }
       class="topology-container"
-      style="position: relative; width: 100%; height: 600px; background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; border: 1px solid rgba(255, 255, 255, 0.05);"
     >
       <svg
         id="topology-svg"
@@ -68,11 +67,11 @@ defmodule PhoenixUiWeb.TopologyComponent do
           <%= for region <- @regions do %>
             <div class="flex items-center gap-2 animate-fade-in-up">
               <div class="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_10px_#06b6d4]"></div>
-              <span class="text-xs font-mono text-cyan-200">
+              <span class="text-xs font-mono text-cyan-600 dark:text-cyan-200">
                 {Map.get(region, :code) || Map.get(region, "code") || Map.get(region, :name) ||
                   Map.get(region, "name")}
               </span>
-              <span class="text-[10px] text-slate-500 uppercase tracking-wider">{region.name}</span>
+              <span class="text-[10px] text-slate-600 dark:text-slate-500 uppercase tracking-wider">{region.name}</span>
             </div>
           <% end %>
         </div>

@@ -18,4 +18,14 @@ config :orchestrator, :nats, url: System.get_env("NATS_URL", "nats://localhost:4
 
 config :orchestrator, :flyd, url: System.get_env("FLYD_URL", "http://localhost:8080")
 
+flyd_url = System.get_env("FLYD_URL", "http://localhost:8080")
+
+config :orchestrator, :region_endpoints, %{
+  "iad" => flyd_url,
+  "us-east-1" => flyd_url,
+  "eu-west-1" => flyd_url,
+  "ap-south-1" => flyd_url,
+  "us-west-2" => flyd_url
+}
+
 config :orchestrator, :net_sim, url: System.get_env("NET_SIM_URL", "http://localhost:7070")

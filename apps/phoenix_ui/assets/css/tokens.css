@@ -300,7 +300,24 @@
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.topology-container svg {
+[data-theme="light"] .topology-container,
+.light .topology-container {
+  background: 
+    linear-gradient(135deg, 
+      rgba(224, 242, 254, 0.7) 0%,
+      rgba(237, 233, 254, 0.6) 25%,
+      rgba(252, 231, 243, 0.5) 50%,
+      rgba(219, 234, 254, 0.6) 75%,
+      rgba(236, 253, 245, 0.7) 100%
+    );
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  box-shadow: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+    0 4px 16px -2px rgba(139, 92, 246, 0.08),
+    0 2px 8px -2px rgba(6, 182, 212, 0.06);
+}
+
+.topology-container #topology-svg {
   position: absolute;
   top: 0;
   left: 0;
@@ -319,12 +336,27 @@
   padding: 0;
 }
 
-.topology-zoom-controls {
+[data-theme="light"] .topology-wrapper,
+.light .topology-wrapper {
+  background: 
+    linear-gradient(145deg, 
+      rgba(255, 255, 255, 0.95) 0%,
+      rgba(248, 250, 252, 0.9) 50%,
+      rgba(255, 255, 255, 0.95) 100%
+    );
+  border: 1px solid rgba(139, 92, 246, 0.12);
+  box-shadow: 
+    0 8px 32px -4px rgba(139, 92, 246, 0.08),
+    0 4px 16px -2px rgba(6, 182, 212, 0.05),
+    inset 0 1px 0 0 rgba(255, 255, 255, 1);
+}
+
+.topology-zoom-controls:not(.btn-group-vertical) {
   position: absolute;
   top: 1rem;
   right: 1rem;
   z-index: 40;
-  display: flex;
+  display: none;
   flex-direction: row;
   gap: 0.125rem;
   background: rgba(15, 23, 42, 0.85);
@@ -336,14 +368,14 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
-[data-theme="light"] .topology-zoom-controls,
-.light .topology-zoom-controls {
+[data-theme="light"] .topology-zoom-controls:not(.btn-group-vertical),
+.light .topology-zoom-controls:not(.btn-group-vertical) {
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(0, 0, 0, 0.1);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
 }
 
-.topology-zoom-controls .zoom-btn {
+.topology-zoom-controls:not(.btn-group-vertical) .zoom-btn {
   width: 28px;
   height: 28px;
   display: flex;
@@ -357,36 +389,36 @@
   cursor: pointer;
 }
 
-.topology-zoom-controls .zoom-btn:hover {
+.topology-zoom-controls:not(.btn-group-vertical) .zoom-btn:hover {
   background: rgba(6, 182, 212, 0.15);
   color: rgba(6, 182, 212, 1);
 }
 
-.topology-zoom-controls .zoom-btn:active {
+.topology-zoom-controls:not(.btn-group-vertical) .zoom-btn:active {
   transform: scale(0.95);
   background: rgba(6, 182, 212, 0.25);
 }
 
-[data-theme="light"] .topology-zoom-controls .zoom-btn,
-.light .topology-zoom-controls .zoom-btn {
+[data-theme="light"] .topology-zoom-controls:not(.btn-group-vertical) .zoom-btn,
+.light .topology-zoom-controls:not(.btn-group-vertical) .zoom-btn {
   color: rgba(71, 85, 105, 1);
 }
 
-[data-theme="light"] .topology-zoom-controls .zoom-btn:hover,
-.light .topology-zoom-controls .zoom-btn:hover {
+[data-theme="light"] .topology-zoom-controls:not(.btn-group-vertical) .zoom-btn:hover,
+.light .topology-zoom-controls:not(.btn-group-vertical) .zoom-btn:hover {
   background: rgba(6, 182, 212, 0.1);
   color: rgba(6, 182, 212, 1);
 }
 
-.topology-zoom-controls .zoom-divider {
+.topology-zoom-controls:not(.btn-group-vertical) .zoom-divider {
   width: 1px;
   height: 20px;
   background: rgba(255, 255, 255, 0.1);
   margin: auto 0.25rem;
 }
 
-[data-theme="light"] .topology-zoom-controls .zoom-divider,
-.light .topology-zoom-controls .zoom-divider {
+[data-theme="light"] .topology-zoom-controls:not(.btn-group-vertical) .zoom-divider,
+.light .topology-zoom-controls:not(.btn-group-vertical) .zoom-divider {
   background: rgba(0, 0, 0, 0.1);
 }
 

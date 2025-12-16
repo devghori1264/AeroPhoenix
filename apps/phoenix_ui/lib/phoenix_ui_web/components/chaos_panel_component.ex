@@ -6,10 +6,10 @@ defmodule PhoenixUiWeb.ChaosPanelComponent do
     ~H"""
     <div class="space-y-6">
       <div class={[
-        "glass-panel p-6 rounded-xl border transition-all duration-500 relative overflow-hidden",
+        "chaos-panel-container glass-panel p-6 rounded-xl border transition-all duration-500 relative overflow-hidden",
         if(length(@active_chaos) > 0,
           do: "border-rose-500/50 shadow-[0_0_30px_rgba(244,63,94,0.2)]",
-          else: "border-white/5"
+          else: "border-white/5 dark:border-white/5"
         )
       ]}>
         <%= if length(@active_chaos) > 0 do %>
@@ -24,14 +24,14 @@ defmodule PhoenixUiWeb.ChaosPanelComponent do
                 "w-10 h-10 rounded-lg flex items-center justify-center border transition-colors",
                 if(length(@active_chaos) > 0,
                   do: "bg-rose-500/20 border-rose-500/50 text-rose-400",
-                  else: "bg-slate-800 border-slate-700 text-slate-500"
+                  else: "chaos-icon-box bg-slate-800 dark:bg-slate-800 border-slate-700 dark:border-slate-700 text-slate-500 dark:text-slate-500"
                 )
               ]}>
                 <.icon name="hero-fire" class="w-6 h-6" />
               </div>
               <div>
-                <h3 class="text-lg font-bold text-white">Chaos Engine</h3>
-                <p class="text-xs text-slate-400 uppercase tracking-wider">
+                <h3 class="chaos-title text-lg font-bold text-white dark:text-white">Chaos Engine</h3>
+                <p class="text-xs text-slate-400 dark:text-slate-400 uppercase tracking-wider">
                   {if length(@active_chaos) > 0, do: "SYSTEM UNDER STRESS", else: "SYSTEM NOMINAL"}
                 </p>
               </div>
@@ -73,8 +73,8 @@ defmodule PhoenixUiWeb.ChaosPanelComponent do
               <% end %>
             </div>
           <% else %>
-            <div class="h-24 flex items-center justify-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
-              <span class="text-xs text-slate-500 font-mono">NO ACTIVE INCIDENTS</span>
+            <div class="chaos-empty-state h-24 flex items-center justify-center border border-dashed rounded-lg">
+              <span class="text-xs font-mono chaos-empty-text">NO ACTIVE INCIDENTS</span>
             </div>
           <% end %>
         </div>
