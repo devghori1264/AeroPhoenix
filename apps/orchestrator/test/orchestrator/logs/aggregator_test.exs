@@ -4,13 +4,16 @@ defmodule Orchestrator.Logs.AggregatorTest do
 
   setup do
     case Process.whereis(Aggregator) do
-      nil -> :ok
+      nil ->
+        :ok
+
       existing_pid ->
         try do
           GenServer.stop(existing_pid, :normal, 500)
         catch
           :exit, _ -> :ok
         end
+
         Process.sleep(50)
     end
 
