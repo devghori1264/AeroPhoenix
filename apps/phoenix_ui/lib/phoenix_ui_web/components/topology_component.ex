@@ -71,7 +71,9 @@ defmodule PhoenixUiWeb.TopologyComponent do
                 {Map.get(region, :code) || Map.get(region, "code") || Map.get(region, :name) ||
                   Map.get(region, "name")}
               </span>
-              <span class="text-[10px] text-slate-600 dark:text-slate-500 uppercase tracking-wider">{region.name}</span>
+              <span class="text-[10px] text-slate-600 dark:text-slate-500 uppercase tracking-wider">
+                {region.name}
+              </span>
             </div>
           <% end %>
         </div>

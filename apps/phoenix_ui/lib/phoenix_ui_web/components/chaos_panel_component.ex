@@ -24,7 +24,8 @@ defmodule PhoenixUiWeb.ChaosPanelComponent do
                 "w-10 h-10 rounded-lg flex items-center justify-center border transition-colors",
                 if(length(@active_chaos) > 0,
                   do: "bg-rose-500/20 border-rose-500/50 text-rose-400",
-                  else: "chaos-icon-box bg-slate-800 dark:bg-slate-800 border-slate-700 dark:border-slate-700 text-slate-500 dark:text-slate-500"
+                  else:
+                    "chaos-icon-box bg-slate-800 dark:bg-slate-800 border-slate-700 dark:border-slate-700 text-slate-500 dark:text-slate-500"
                 )
               ]}>
                 <.icon name="hero-fire" class="w-6 h-6" />
