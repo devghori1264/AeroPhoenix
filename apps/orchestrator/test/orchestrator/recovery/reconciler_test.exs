@@ -360,7 +360,8 @@ defmodule Orchestrator.Recovery.ReconcilerTest do
           id: id,
           region: "test",
           status: "running",
-          name: "test-machine"
+          name: "test-machine",
+          machine_type: "t2.micro"
         })
 
       {:ok, pid} = MachActorSup.start_machine(id: id, region: "test")

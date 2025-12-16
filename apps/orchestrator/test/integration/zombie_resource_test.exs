@@ -92,7 +92,8 @@ defmodule Orchestrator.Integration.ZombieResourceTest do
           id: machine_id,
           name: "test-" <> machine_id,
           region: "us-east-1",
-          status: "stopped"
+          status: "stopped",
+          machine_type: "t2.micro"
         })
 
       {:ok, pid} =

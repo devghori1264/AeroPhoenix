@@ -196,7 +196,12 @@ defmodule Orchestrator.Testing.Holodeck do
 
     ets_memory_bytes =
       :ets.all()
-      |> Enum.map(fn table -> :ets.info(table, :memory) * :erlang.system_info(:wordsize) end)
+      |> Enum.map(fn table ->
+        case :ets.info(table, :memory) do
+          :undefined -> 0
+          mem when is_integer(mem) -> mem * :erlang.system_info(:wordsize)
+        end
+      end)
       |> Enum.sum()
 
     ets_memory_mb = div(ets_memory_bytes, 1_024 * 1_024)
