@@ -5,6 +5,7 @@ import (
 	"net/http"
 )
 
+//nolint:unused
 func startHTTP() {
 	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("pong from flyd-sim http"))

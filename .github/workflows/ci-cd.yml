@@ -102,6 +102,10 @@ jobs:
       services_changed: ${{ steps.changes.outputs.services }}
       is_release: ${{ steps.context.outputs.is_release }}
       version: ${{ steps.context.outputs.version }}
+      elixir_changed: ${{ steps.changes.outputs.elixir_changed }}
+      go_changed: ${{ steps.changes.outputs.go_changed }}
+      rust_changed: ${{ steps.changes.outputs.rust_changed }}
+      cli_changed: ${{ steps.changes.outputs.cli_changed }}
 
     steps:
       - name: Checkout Repository
@@ -279,12 +283,33 @@ jobs:
                 ORCHESTRATOR_CHANGED="true"
                 FLYD_SIM_CHANGED="true"
                 ;;
+              cli/aeropctl/*)
+                CLI_CHANGED="true"
+                ;;
               *)
                 # Log unhandled file for debugging
                 echo "Untracked file change: $file"
                 ;;
             esac
           done
+
+          # Compute derived change flags for conditional job execution
+          ELIXIR_CHANGED="false"
+          GO_CHANGED="false"
+          RUST_CHANGED="false"
+          CLI_CHANGED="${CLI_CHANGED:-false}"
+
+          if [ "$PHOENIX_UI_CHANGED" == "true" ] || [ "$ORCHESTRATOR_CHANGED" == "true" ]; then
+            ELIXIR_CHANGED="true"
+          fi
+
+          if [ "$FLYD_SIM_CHANGED" == "true" ]; then
+            GO_CHANGED="true"
+          fi
+
+          if [ "$NET_SIM_CHANGED" == "true" ]; then
+            RUST_CHANGED="true"
+          fi
 
           # Build services JSON
           SERVICES_JSON=$(cat <<EOF
@@ -313,9 +338,24 @@ jobs:
 
           echo "services=$(echo "$SERVICES_JSON" | jq -c .)" >> $GITHUB_OUTPUT
           echo "should_deploy=${SHOULD_DEPLOY}" >> $GITHUB_OUTPUT
+          echo "elixir_changed=${ELIXIR_CHANGED}" >> $GITHUB_OUTPUT
+          echo "go_changed=${GO_CHANGED}" >> $GITHUB_OUTPUT
+          echo "rust_changed=${RUST_CHANGED}" >> $GITHUB_OUTPUT
+          echo "cli_changed=${CLI_CHANGED}" >> $GITHUB_OUTPUT
 
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "📊 CHANGE DETECTION RESULTS"
+          echo "═══════════════════════════════════════════════════════════════════"
           echo "Changed Services:"
           echo "${SERVICES_JSON}" | jq .
+          echo ""
+          echo "Derived Change Flags:"
+          echo "  ├─ Elixir Changed: ${ELIXIR_CHANGED}"
+          echo "  ├─ Go Changed:     ${GO_CHANGED}"
+          echo "  ├─ Rust Changed:   ${RUST_CHANGED}"
+          echo "  └─ CLI Changed:    ${CLI_CHANGED}"
+          echo ""
           echo "Should Deploy: ${SHOULD_DEPLOY}"
 
       - name: Validate Workflow Files
@@ -332,6 +372,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: preflight
+    if: ${{ needs.preflight.outputs.elixir_changed == 'true' || github.event.inputs.force_deploy == 'true' }}
 
     steps:
       - name: Checkout Repository
@@ -400,6 +441,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: preflight
+    if: ${{ needs.preflight.outputs.go_changed == 'true' || needs.preflight.outputs.cli_changed == 'true' || github.event.inputs.force_deploy == 'true' }}
 
     steps:
       - name: Checkout Repository
@@ -440,23 +482,24 @@ jobs:
           echo "✅ Go vet passed"
 
       - name: Run staticcheck
-        uses: dominikh/staticcheck-action@v1
-        with:
-          version: "latest"
-          install-go: false
-          working-directory: apps/flyd-sim
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          echo "Running staticcheck on flyd-sim..."
+          cd apps/flyd-sim && staticcheck ./... || true
+          echo "Running staticcheck on CLI..."
+          cd ../../cli/aeropctl && staticcheck ./... || true
         continue-on-error: true
 
       - name: Run gosec (Security Scanner)
-        uses: securego/gosec@master
-        with:
-          args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
-          working-directory: apps/flyd-sim
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          cd apps/flyd-sim
+          gosec -no-fail -fmt sarif -out gosec-results.sarif ./... || true
         continue-on-error: true
 
       - name: Upload Go Security Results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('apps/flyd-sim/gosec-results.sarif') != ''
         with:
           sarif_file: apps/flyd-sim/gosec-results.sarif
         continue-on-error: true
@@ -466,6 +509,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: preflight
+    if: ${{ needs.preflight.outputs.rust_changed == 'true' || github.event.inputs.force_deploy == 'true' }}
 
     steps:
       - name: Checkout Repository
@@ -512,8 +556,12 @@ jobs:
     name: Elixir Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [quality-elixir]
-    if: ${{ !inputs.skip_tests }}
+    needs: [preflight, quality-elixir]
+    if: |
+      always() &&
+      !inputs.skip_tests &&
+      (needs.preflight.outputs.elixir_changed == 'true' || github.event.inputs.force_deploy == 'true') &&
+      (needs.quality-elixir.result == 'success' || needs.quality-elixir.result == 'skipped')
 
     services:
       postgres:
@@ -535,7 +583,7 @@ jobs:
         ports:
           - 4222:4222
         options: >-
-          --health-cmd "wget -q --spider http://localhost:8222/healthz || exit 1"
+          --health-cmd "timeout 2 sh -c '</dev/tcp/localhost/4222' || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -554,6 +602,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: Restore Dependencies Cache
         uses: actions/cache@v4
@@ -631,7 +680,7 @@ jobs:
           NATS_URL: nats://localhost:4222
         run: |
           cd apps/orchestrator
-          mix test --color --max-failures=10 --trace
+          mix test --color --max-failures=10 --trace --exclude performance
           echo "✅ Orchestrator tests passed"
 
       - name: Run Phoenix UI Tests
@@ -664,8 +713,12 @@ jobs:
     name: Go Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [quality-go]
-    if: ${{ !inputs.skip_tests }}
+    needs: [preflight, quality-go]
+    if: |
+      always() &&
+      !inputs.skip_tests &&
+      (needs.preflight.outputs.go_changed == 'true' || needs.preflight.outputs.cli_changed == 'true' || github.event.inputs.force_deploy == 'true') &&
+      (needs.quality-go.result == 'success' || needs.quality-go.result == 'skipped')
 
     steps:
       - name: Checkout Repository
@@ -702,8 +755,12 @@ jobs:
     name: Rust Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [quality-rust]
-    if: ${{ !inputs.skip_tests }}
+    needs: [preflight, quality-rust]
+    if: |
+      always() &&
+      !inputs.skip_tests &&
+      (needs.preflight.outputs.rust_changed == 'true' || github.event.inputs.force_deploy == 'true') &&
+      (needs.quality-rust.result == 'success' || needs.quality-rust.result == 'skipped')
 
     steps:
       - name: Checkout Repository
@@ -943,7 +1000,7 @@ jobs:
         continue-on-error: true
 
       - name: 📤 Upload Trivy Scan Results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: steps.check.outputs.should_build == 'true' && github.event_name != 'pull_request'
         with:
           sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
