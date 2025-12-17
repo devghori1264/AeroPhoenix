@@ -22,7 +22,7 @@ A complete walkthrough demonstrating machine deployment, state transitions, and 
 <table>
   <tr>
     <td align="center">
-      <video src="https://github.com/user-attachments/assets/demo.mp4" width="100%" controls></video>
+      <video src="https://github.com/user-attachments/assets/df454702-8d01-495d-b3a3-1b6c8e602e17" width="100%" controls></video>
       <br>
       <em>Full demonstration: machine creation, state monitoring, and live migration</em>
     </td>
