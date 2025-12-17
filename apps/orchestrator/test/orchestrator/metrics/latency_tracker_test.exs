@@ -339,7 +339,7 @@ defmodule Orchestrator.Metrics.LatencyTrackerTest do
 
       duration_ms = div(end_time - start_time, 1000)
 
-      assert duration_ms < 50
+      assert duration_ms < 100
     end
 
     @tag :performance

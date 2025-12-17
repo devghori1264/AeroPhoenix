@@ -1,21 +1,611 @@
-name: Release
+name: Release Pipeline
 
 on:
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types: [completed]
+    branches: [main]
+
   workflow_dispatch:
-  release:
-    types: [published]
+    inputs:
+      version_tag:
+        description: 'Version tag to release (e.g., v1.0.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run (no artifacts published)'
+        required: false
+        default: false
+        type: boolean
+      skip_security:
+        description: 'Skip security scanning (emergency only)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  security-events: write
+  actions: read
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/aerophoenix
 
 jobs:
-  build-release:
+  gate:
+    name: Release Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: |
+      (github.event_name == 'workflow_run' && 
+       github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'refs/tags/v')) ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
+      sha: ${{ steps.check.outputs.sha }}
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Build demo artifacts
-        run: |
-          tar -czf demo_assets.tar.gz demo demo.mp4 docs
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          files: demo_assets.tar.gz
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Determine Release Context
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version_tag }}"
+            SHA="${{ github.sha }}"
+          else
+            VERSION="${{ github.event.workflow_run.head_branch }}"
+            SHA="${{ github.event.workflow_run.head_sha }}"
+          fi
+          
+          VERSION_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+(-((alpha|beta|rc)\.[0-9]+))?$'
+          
+          if [[ "$VERSION" =~ $VERSION_REGEX ]]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "sha=${SHA}" >> $GITHUB_OUTPUT
+            echo "✅ Release gate passed: ${VERSION}"
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "⏭️ Not a release tag: ${VERSION}"
+          fi
+
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [gate]
+    if: needs.gate.outputs.should_release == 'true'
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      version_bare: ${{ steps.parse.outputs.version_bare }}
+      major: ${{ steps.parse.outputs.major }}
+      minor: ${{ steps.parse.outputs.minor }}
+      patch: ${{ steps.parse.outputs.patch }}
+      channel: ${{ steps.parse.outputs.channel }}
+      is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
+      previous_tag: ${{ steps.previous.outputs.tag }}
+      go_version: ${{ steps.versions.outputs.go_version }}
+      sha: ${{ needs.gate.outputs.sha }}
+      dry_run: ${{ inputs.dry_run || 'false' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Parse Version
+        id: parse
+        run: |
+          chmod +x .github/scripts/parse-version.sh
+          .github/scripts/parse-version.sh "${{ needs.gate.outputs.version }}"
+
+      - name: Extract Source Versions
+        id: versions
+        run: |
+          chmod +x .github/scripts/extract-versions.sh
+          .github/scripts/extract-versions.sh .
+
+      - name: Find Previous Tag
+        id: previous
+        run: |
+          CURRENT="${{ needs.gate.outputs.version }}"
+          CHANNEL="${{ steps.parse.outputs.channel }}"
+          
+          if [[ "$CHANNEL" == "stable" ]]; then
+            PREVIOUS=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | \
+                      grep -v '\-' | grep -v "^${CURRENT}$" | head -1)
+          else
+            PREVIOUS=$(git tag -l 'v*' --sort=-v:refname | \
+                      grep -v "^${CURRENT}$" | head -1)
+          fi
+          
+          echo "tag=${PREVIOUS:-}" >> $GITHUB_OUTPUT
+
+      - name: Verify CI/CD Images Exist
+        run: |
+          SHA="${{ needs.gate.outputs.sha }}"
+          
+          for service in phoenix-ui orchestrator flyd-sim net-sim; do
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${service}:sha-${SHA}"
+            echo "Checking: ${IMAGE}"
+            
+            if ! docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+              echo "❌ Image not found: ${IMAGE}"
+              echo "   CI/CD pipeline may not have completed. Please verify."
+              exit 1
+            fi
+            echo "✅ Found: ${IMAGE}"
+          done
+        env:
+          DOCKER_CLI_EXPERIMENTAL: enabled
+
+  build-cli:
+    name: Build CLI (${{ matrix.os }}/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    needs: [preflight]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            ext: ''
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            ext: ''
+            cross: true
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+            ext: ''
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            ext: ''
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            ext: '.exe'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/aeropctl/go.mod
+          cache-dependency-path: cli/aeropctl/go.sum
+
+      - name: Build CLI
+        shell: bash
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          cd cli/aeropctl
+          
+          VERSION="${{ needs.preflight.outputs.version }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          GIT_COMMIT="${{ needs.preflight.outputs.sha }}"
+          
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}"
+          
+          go build -ldflags="${LDFLAGS}" -o "aeropctl-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}" .
+          
+          mkdir -p ../../dist
+          mv "aeropctl-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}" ../../dist/
+
+      - name: Create Archive (Unix)
+        if: matrix.os != 'windows'
+        run: |
+          cd dist
+          tar -czvf "aeropctl-${{ needs.preflight.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz" \
+            "aeropctl-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+
+      - name: Create Archive (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          cd dist
+          Compress-Archive -Path "aeropctl-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}" `
+            -DestinationPath "aeropctl-${{ needs.preflight.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}.zip"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
+          retention-days: 7
+
+  build-server-go:
+    name: Build Server (Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [preflight]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            goarch: amd64
+          - arch: arm64
+            goarch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/flyd-sim/go.mod
+          cache-dependency-path: apps/flyd-sim/go.sum
+
+      - name: Build flyd-sim
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          cd apps/flyd-sim
+          
+          VERSION="${{ needs.preflight.outputs.version }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          GIT_COMMIT="${{ needs.preflight.outputs.sha }}"
+          
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}"
+          
+          go build -ldflags="${LDFLAGS}" -o "flyd-sim-linux-${{ matrix.arch }}" ./cmd/server
+          
+          mkdir -p ../../dist
+          mv "flyd-sim-linux-${{ matrix.arch }}" ../../dist/
+
+      - name: Create Archive
+        run: |
+          cd dist
+          tar -czvf "flyd-sim-${{ needs.preflight.outputs.version }}-linux-${{ matrix.arch }}.tar.gz" \
+            "flyd-sim-linux-${{ matrix.arch }}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-go-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  build-server-rust:
+    name: Build Server (Rust/${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [preflight]
+    container:
+      image: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: amd64
+            container: rust:1.75-slim-bookworm
+          - target: aarch64-unknown-linux-gnu
+            arch: arm64
+            container: ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        if: matrix.arch == 'amd64'
+        run: |
+          apt-get update
+          apt-get install -y pkg-config libssl-dev
+
+      - name: Build net-sim
+        run: |
+          cd apps/net-sim
+          
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          
+          cargo build --release --target ${{ matrix.target }}
+          
+          mkdir -p ../../dist
+          cp target/${{ matrix.target }}/release/net_sim \
+            "../../dist/net-sim-linux-${{ matrix.arch }}"
+
+      - name: Strip Binary
+        if: matrix.arch == 'amd64'
+        run: strip dist/net-sim-linux-${{ matrix.arch }}
+
+      - name: Create Archive
+        run: |
+          cd dist
+          tar -czvf "net-sim-${{ needs.preflight.outputs.version }}-linux-${{ matrix.arch }}.tar.gz" \
+            "net-sim-linux-${{ matrix.arch }}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-rust-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  docker-tag:
+    name: Tag Docker Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [preflight]
+    if: needs.preflight.outputs.dry_run != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [phoenix-ui, orchestrator, flyd-sim, net-sim]
+
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and Push
+        run: |
+          SHA="${{ needs.preflight.outputs.sha }}"
+          VERSION="${{ needs.preflight.outputs.version }}"
+          MAJOR="${{ needs.preflight.outputs.major }}"
+          MINOR="${{ needs.preflight.outputs.minor }}"
+          IS_PRERELEASE="${{ needs.preflight.outputs.is_prerelease }}"
+          CHANNEL="${{ needs.preflight.outputs.channel }}"
+          
+          SOURCE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:sha-${SHA}"
+          
+          docker pull "$SOURCE"
+          
+          docker tag "$SOURCE" "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${VERSION}"
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${VERSION}"
+          
+          if [[ "$IS_PRERELEASE" == "false" ]]; then
+            docker tag "$SOURCE" "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${MAJOR}.${MINOR}"
+            docker push "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${MAJOR}.${MINOR}"
+            
+            docker tag "$SOURCE" "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${MAJOR}"
+            docker push "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${MAJOR}"
+            
+            docker tag "$SOURCE" "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest"
+            docker push "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest"
+          else
+            docker tag "$SOURCE" "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${CHANNEL}"
+            docker push "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${CHANNEL}"
+          fi
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [preflight, build-cli, build-server-go, build-server-rust, docker-tag]
+    if: |
+      always() &&
+      needs.preflight.result == 'success' &&
+      inputs.skip_security != true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SBOM
+        run: |
+          mkdir -p sbom
+          
+          for service in phoenix-ui orchestrator flyd-sim net-sim; do
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${service}:${{ needs.preflight.outputs.version }}"
+            syft "$IMAGE" -o cyclonedx-json > "sbom/${service}-sbom.json" || true
+          done
+
+      - name: Scan Docker Images
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/phoenix-ui:${{ needs.preflight.outputs.version }}'
+          format: 'sarif'
+          output: 'trivy-phoenix-ui.sarif'
+          severity: 'CRITICAL,HIGH'
+        continue-on-error: true
+
+      - name: Scan All Services
+        run: |
+          for service in orchestrator flyd-sim net-sim; do
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${service}:${{ needs.preflight.outputs.version }}"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image --severity CRITICAL,HIGH \
+              --format sarif --output "trivy-${service}.sarif" \
+              "$IMAGE" || true
+          done
+        continue-on-error: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign Images
+        if: needs.preflight.outputs.dry_run != 'true'
+        run: |
+          for service in phoenix-ui orchestrator flyd-sim net-sim; do
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${service}:${{ needs.preflight.outputs.version }}"
+            cosign sign --yes "$IMAGE" || true
+          done
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/*.json
+          retention-days: 90
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-phoenix-ui.sarif'
+        continue-on-error: true
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [preflight, build-cli, build-server-go, build-server-rust, docker-tag, security]
+    if: |
+      always() &&
+      needs.preflight.result == 'success' &&
+      needs.build-cli.result == 'success' &&
+      needs.build-server-go.result == 'success' &&
+      (needs.build-server-rust.result == 'success' || needs.build-server-rust.result == 'skipped') &&
+      (needs.docker-tag.result == 'success' || needs.docker-tag.result == 'skipped') &&
+      (needs.security.result == 'success' || needs.security.result == 'skipped') &&
+      needs.preflight.outputs.dry_run != 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate Changelog
+        run: |
+          chmod +x .github/scripts/generate-changelog.sh
+          .github/scripts/generate-changelog.sh \
+            "${{ needs.preflight.outputs.previous_tag }}" \
+            "${{ needs.preflight.outputs.sha }}" \
+            CHANGELOG.md
+          
+          cat >> CHANGELOG.md << 'EOF'
+          
+          ---
+          
+          ## Installation
+          
+          ### CLI
+          
+          ```bash
+          # macOS (Apple Silicon)
+          curl -L https://github.com/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.version }}/aeropctl-${{ needs.preflight.outputs.version }}-darwin-arm64.tar.gz | tar xz
+          sudo mv aeropctl-darwin-arm64 /usr/local/bin/aeropctl
+          
+          # Linux (AMD64)
+          curl -L https://github.com/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.version }}/aeropctl-${{ needs.preflight.outputs.version }}-linux-amd64.tar.gz | tar xz
+          sudo mv aeropctl-linux-amd64 /usr/local/bin/aeropctl
+          ```
+          
+          ### Docker
+          
+          ```bash
+          docker pull ghcr.io/${{ github.repository_owner }}/aerophoenix/phoenix-ui:${{ needs.preflight.outputs.version }}
+          docker pull ghcr.io/${{ github.repository_owner }}/aerophoenix/orchestrator:${{ needs.preflight.outputs.version }}
+          docker pull ghcr.io/${{ github.repository_owner }}/aerophoenix/flyd-sim:${{ needs.preflight.outputs.version }}
+          docker pull ghcr.io/${{ github.repository_owner }}/aerophoenix/net-sim:${{ needs.preflight.outputs.version }}
+          ```
+          
+          EOF
+
+      - name: Prepare Assets
+        run: |
+          mkdir -p final-assets
+          
+          find release-assets -type f \( -name "*.tar.gz" -o -name "*.zip" \) \
+            -exec mv {} final-assets/ \;
+          
+          find release-assets -name "*-sbom.json" -exec mv {} final-assets/ \; 2>/dev/null || true
+          
+          cd final-assets
+          sha256sum * > SHA256SUMS 2>/dev/null || true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.version }}
+          name: AeroPhoenix ${{ needs.preflight.outputs.version }}
+          body_path: CHANGELOG.md
+          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
+          draft: false
+          files: final-assets/*
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [preflight, release]
+    if: always()
+
+    steps:
+      - name: Summary
+        run: |
+          VERSION="${{ needs.preflight.outputs.version }}"
+          RESULT="${{ needs.release.result }}"
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Release Summary
+          
+          | Property | Value |
+          |----------|-------|
+          | Version | \`${VERSION}\` |
+          | Channel | ${{ needs.preflight.outputs.channel }} |
+          | Status | ${RESULT} |
+          | SHA | \`${{ needs.preflight.outputs.sha }}\` |
+          
+          ## Docker Images
+          
+          \`\`\`
+          ghcr.io/${{ github.repository_owner }}/aerophoenix/phoenix-ui:${VERSION}
+          ghcr.io/${{ github.repository_owner }}/aerophoenix/orchestrator:${VERSION}
+          ghcr.io/${{ github.repository_owner }}/aerophoenix/flyd-sim:${VERSION}
+          ghcr.io/${{ github.repository_owner }}/aerophoenix/net-sim:${VERSION}
+          \`\`\`
+          EOF
